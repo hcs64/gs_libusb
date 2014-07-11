@@ -5,9 +5,6 @@
 #include <arpa/inet.h>  // for htons
 #include <unistd.h>
 
-// TODO:
-// - instr cache invalidate all embedded code in loader
-
 #include "mips.h"
 #include "gscomms.h"
 
@@ -18,7 +15,7 @@ int run(gscomms * g, unsigned long addr);
 void patch_fast_receive(gscomms * g);
 void unpatch_fast_receive(gscomms * g);
 
-#define UPLOAD_ADDR 0xA0300000UL 
+#define UPLOAD_ADDR 0x80300000UL
 #define ENTRYPOINT  0x80300000UL
 #define EMBED_ADDR  0xA0300000UL-1024
 
@@ -85,90 +82,6 @@ unsigned long codebuf_pre[]=
   ERET,
   NOP,
 };
-
-#if 1
-unsigned long codebuf_start_gscomms[] = {
-  /* Callback function: Start GScomms */
-  MFC0(MIPS_T0, 12),
-  MIPS_ADDIU(MIPS_T1, MIPS_R0, 0xfffe),
-  MIPS_AND(MIPS_T0, MIPS_T0, MIPS_T1),
-  MTC0(MIPS_T0, 12),
-  LUI(MIPS_V0,0xa000),
-  ORI(MIPS_A2,MIPS_V0,0x180),
-  LW(MIPS_A0,0,MIPS_A2),
-  ORI(MIPS_V1,MIPS_V0,0x120),
-  SW(MIPS_A0,0, MIPS_V1),
-  ORI(MIPS_A1,MIPS_V0,0x184),
-  LW(MIPS_A0,0,MIPS_A1),
-  ORI(MIPS_V1,MIPS_V0,0x124),
-  SW(MIPS_A0,0,MIPS_V1),
-  ORI(MIPS_A0,MIPS_V0,0x188),
-  LW(MIPS_A3,0,MIPS_A0),
-  ORI(MIPS_V1,MIPS_V0,0x128),
-  SW(MIPS_A3,0,MIPS_V1),
-  ORI(MIPS_V1,MIPS_V0,0x18c),
-  LW(MIPS_A3,0,MIPS_V1),
-  ORI(MIPS_V0,MIPS_V0,0x12c),
-  SW(MIPS_A3,0,MIPS_V0),
-  LUI(MIPS_V0,0x3c1a),
-  ORI(MIPS_V0,MIPS_V0,0xa079),
-  SW(MIPS_V0,0,MIPS_A2),
-  LUI(MIPS_V0,0x275a),
-  ORI(MIPS_V0,MIPS_V0,0x4aec),
-  SW(	MIPS_V0,0,MIPS_A1),
-  LUI(MIPS_V0,0x340),
-  ORI(MIPS_V0,MIPS_V0,0x8),
-  SW(MIPS_V0,0,MIPS_A0),
-  SW(MIPS_R0,0,MIPS_V1),
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x120),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x124),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x128),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x12c),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x180),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x184),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x188),
-  CACHE(MIPS_T1, 0x10, 0),
-  NOP,
-  LUI(MIPS_T1,0xa000),
-  ORI(MIPS_T1,MIPS_T1,0x18c),
-  CACHE(MIPS_T1, 0x10, 0),
-  MFC0(MIPS_T0, 12),
-  ORI(MIPS_T0, MIPS_T0, 1),
-  MTC0(MIPS_T0, 12),
-  JR(MIPS_RA),    
-  NOP,
-};
-
-unsigned long codebuf_check_gsbutton[] = {
-  /* Callback function: Check GS Button */
-  LUI(MIPS_V0, 0xbe40),
-  LBU(MIPS_V0, 0, MIPS_V0),
-  SRA(MIPS_V0, MIPS_V0, 0x2),
-  XORI(MIPS_V0, MIPS_V0, 0x1),
-  ANDI(MIPS_V0, MIPS_V0, 0x1),
-  JR(MIPS_RA),
-  NOP,
-};
-#endif
 
 #define DEBOUNCE_COUNT 1
 
@@ -248,13 +161,24 @@ embedded_code embedded_codes[] = {
 int main(int argc, char ** argv)
 {
   gscomms * g;
+  int two_stage;
 
-  printf("\nN64 HomeBrew Loader - ppcasm (Based on HCS GSUpload)\n");
+  printf("\nN64 HomeBrew Loader - hcs, ppcasm\n");
   printf("MCS7705 USB version via libusb\n\n");
 
-  if(argc!=3)
+
+  if (argc == 2)
+  {
+    two_stage = 0;
+  }
+  else if (argc == 3)
+  {
+    two_stage = 1;
+  }
+  else
   {
     printf("Wrong Usage:\n(Homebrew Uploader): %s <binary>\n", argv[0]);
+    printf("(Two Stage Loader): %s <loader> <binary>\n\n", argv[0]);
     return 1;
   }
 
@@ -291,25 +215,10 @@ int main(int argc, char ** argv)
 
 #endif
 
-  printf("Ok, now try loading...\n");
   /*Upload binary to specified address.*/
 
   WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
   fclose(infile);
-
-  printf("Load finished.\n");
-
-#if 0
-  printf("Patching out modified loader...\n");
-  //InitGSCommsNoisy(g, RETRIES, 1);
-  unpatch_fast_receive(g);
-#if 1
-  Disconnect(g);
-  sleep(1);
-  InitGSCommsNoisy(g, RETRIES, 1);
-#endif
-  printf("Done.\n");
-#endif
 
   run(g, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
   Disconnect(g);
@@ -319,21 +228,23 @@ int main(int argc, char ** argv)
   printf("Done.\n");
 
 
-  infile=fopen(argv[2], "rb");
-  if(!infile)
-  {
-    printf("error opening %s\n", argv[2]);
-    do_clear(g);
-    return 1;
+  if (two_stage) {
+    // let the loader get settled
+    sleep(1);
+
+    infile=fopen(argv[2], "rb");
+    if(!infile)
+    {
+      printf("error opening %s\n", argv[2]);
+      do_clear(g);
+      return 1;
+    }
+
+    InitGSComms(g, RETRIES);
+    WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
+    fclose(infile);
+    Disconnect(g);
   }
-
-  printf("Press a key to load rom");
-  getchar();
-
-  InitGSComms(g, RETRIES);
-  WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
-  fclose(infile);
-  Disconnect(g);
 
   cleanup_gscomms(g);
   g = NULL;
@@ -355,21 +266,6 @@ void patch_fast_receive(gscomms * g) {
     exit(-1);
   }
 }
-
-#if 0
-void unpatch_fast_receive(gscomms * g) {
-  unsigned long jal = 0x0c1e1f57;
-  unsigned char insn[4];
-  write32BE(insn, jal);
-
-  if(UploadFast(g, insn, 4, 0xA07919B0))
-  {  
-    printf("Fast unpatch failed...\n");
-    do_clear(g);
-    exit(-1);
-  }
-}
-#endif
 
 int upload_embedded(gscomms * g)
 {
