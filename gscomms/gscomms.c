@@ -244,50 +244,21 @@ void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int leng
 #endif
 
   while (length > 0) {
-#if 1
+#if 0
     ReadWriteNibble(dev, *data>>4);
     ReadWriteNibble(dev, *data);
 
     length--;
     data++;
 #else
-    int rc;
     int todo = 1; //bytes_per_buf;
     if (todo > length) {
       todo = length;
     }
 
     for (int i = 0; i < todo; i++) {
-
-      rc = libusb_control_transfer(
-        dev,
-        REQTYPE_WRITE,
-        REQ_MOS_WRITE,
-        MOS_PORT_BASE | 0x10 | (data[i] >> 4),
-        MOS_PP_DATA_REG,
-        NULL,
-        0,
-        TIMEOUT);
-
-      if (rc != 0) {
-        fprintf(stderr, "write failed: %s\n", libusb_error_name(rc));
-        exit(-1);
-      }
-
-      rc = libusb_control_transfer(
-        dev,
-        REQTYPE_WRITE,
-        REQ_MOS_WRITE,
-        MOS_PORT_BASE | (data[i] & 0xf),
-        MOS_PP_DATA_REG,
-        NULL,
-        0,
-        TIMEOUT);
-
-      if (rc != 0) {
-        fprintf(stderr, "write failed: %s\n", libusb_error_name(rc));
-        exit(-1);
-      }
+      do_write(dev, data[i] >> 4, 1);
+      do_write(dev, data[i], 0);
     }
 
     length -= todo;
@@ -561,7 +532,9 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
 
   printf("%lu %2lu%%\n", length, 100ul);
 
+  printf("Ending...\n");
   EndTransaction(dev, 0);
+  printf("Ended.\n");
 }
 
 static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length) {
