@@ -226,7 +226,7 @@ unsigned long codebuf_check_gsbutton[] = {
   CACHE(A1, CACH_PI|CACHE_IINV, 0x19B0),
 #endif
 
-#define DEBOUNCE_COUNT 10
+#define DEBOUNCE_COUNT 1
 #define ACK_PULSE 50
 //              /ERROR  /BUSY   /ACK
 // 0x18 = 0x08    1       0       0
@@ -265,14 +265,12 @@ unsigned long codebuf_fifo_receive[] = {
   MIPS_AND(V0, S1, V0),
   MTC0(V0, 12),
 
-  SIMULATE_PROMPT,
-
   /* wait for consistent high nibble */
   ORI(S2, R0, DEBOUNCE_COUNT),
   JAL(0x80787C88),
   NOP,
-  ANDI(V0, V0, 0x10),
-  BEQ(V0, R0, -4*4),
+  ANDI(A0, V0, 0x10),
+  BEQ(A0, R0, -4*4),
   NOP,
   BNE(S2, R0, -6*4),
   ADDIU(S2, S2, -1),
@@ -281,16 +279,12 @@ unsigned long codebuf_fifo_receive[] = {
   ANDI(S0, V0, 0xF),
   SLL(S0, S0, 4),
 
-  SIMULATE_ACK,
-
-  SIMULATE_PROMPT,
-
   /* wait for consistent low nibble */
   ORI(S2, R0, DEBOUNCE_COUNT),
   JAL(0x80787C88),
   NOP,
-  ANDI(V0, V0, 0x10),
-  BNE(V0, R0, -4*4),
+  ANDI(A0, V0, 0x10),
+  BNE(A0, R0, -4*4),
   NOP,
   BNE(S2, R0, -6*4),
   ADDIU(S2, S2, -1),
@@ -298,8 +292,6 @@ unsigned long codebuf_fifo_receive[] = {
   /* collect the nibble */
   ANDI(V0, V0, 0xF),
   OR(S0, V0, S0),
-
-  SIMULATE_ACK,
 
   /* load return value */
   OR(V0, S0, R0),
@@ -372,10 +364,12 @@ int main(int argc, char ** argv)
   //run(dev, embedded_codes[FIFO_PATCH_GOT_IDX].ram_address);
   patch_FIFO_receive(dev);
 
+#if 1
   Disconnect(dev);
-  sleep(2); // might take a little bit for the instruction cache to turn over
+  sleep(1); // might take a little bit for the instruction cache to turn over
   InitGSComms(dev, RETRIES);
   printf("Done.\n");
+#endif
 
   printf("Ok, now try loading...\n");
 #endif
@@ -389,13 +383,15 @@ int main(int argc, char ** argv)
 
   printf("Load finished.\n");
 
-#if 1
+#if 0
   printf("Patching out modified loader...\n");
-  InitGSCommsNoisy(dev, RETRIES, 1);
+  //InitGSCommsNoisy(dev, RETRIES, 1);
   unpatch_FIFO_receive(dev);
+#if 1
   Disconnect(dev);
   sleep(1);
   InitGSCommsNoisy(dev, RETRIES, 1);
+#endif
   printf("Done.\n");
 #endif
 
@@ -557,7 +553,7 @@ int run(libusb_device_handle * dev, unsigned long addr) {
   write32BE(insn, instruction);
 
   /*Inject synthetic jump instruction into code handler to ensure it runs.*/
-  if(Upload(dev, insn, 4, INSN_PATCH_ADDR))
+  if(UploadBulk(dev, insn, 4, INSN_PATCH_ADDR))
   {  
     printf("Instruction patch failed...\n");
     do_clear(dev);

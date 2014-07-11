@@ -264,9 +264,9 @@ void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int leng
 
     for (int i = 0; i < todo; i++) {
       do_write(dev, data[i] >> 4, 1);
-      printf("%02x", do_raw_read(dev));
+      //printf("%02x", do_raw_read(dev));
       do_write(dev, data[i], 0);
-      printf("%02x", do_raw_read(dev));
+      //printf("%02x", do_raw_read(dev));
     }
 
     length -= todo;
@@ -524,9 +524,11 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
   ReadWrite32(dev, address);
   Write32(dev, length);
  
+#if 0
   do_clear(dev);
 
   set_mode(dev, MOS_FIFO_MODE);
+#endif
 
   printf("Bulk Uploading %lu bytes to %x\n", length, (int)address);
 
@@ -549,24 +551,24 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
       printf("%lu %2lu%%\n", i, i*100/length);
     }
 
-    do_bulk_write(dev, buf, todo);
+    do_sim_bulk_write(dev, buf, todo);
 
     i += todo;
   }
 
   printf("%lu %2lu%%\n", length, 100ul);
 
-  set_mode(dev, MOS_SPP_MODE);
-
-  //printf("Ending...\n");
+#if 0
+  //set_mode(dev, MOS_SPP_MODE);
 
   // need to manually send the bytes here as the first one will have a
   // bad flag leftover from FIFO mode, WriteByte ignores these
   for (int i = 0; i < 9; i++) {
     WriteByte(dev, 0);
   }
-  //EndTransaction(dev, 0);
-  //printf("Ended.\n");
+#else
+  EndTransaction(dev, 0);
+#endif
 }
 
 static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length) {

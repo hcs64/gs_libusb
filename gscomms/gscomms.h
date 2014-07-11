@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <libusb-1.0/libusb.h>
 
-static const int RETRIES = 20;
+static const int RETRIES = 5;
 
 // hardware I/O
 uint8_t do_read(libusb_device_handle * dev);
