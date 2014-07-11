@@ -43,17 +43,37 @@ static const uint8_t MOS_FIFO_MODE   = 2 << 5;
 
 static const int TIMEOUT = 1000; // ms
 
-static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length);
-static void WriteRAMByte(libusb_context * ctx, libusb_device_handle * dev, unsigned char b);
-static void WriteRAMFinish(libusb_context *ctx, libusb_device_handle * dev);
+static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length);
+static void WriteRAMByte(gscomms * g, unsigned char b);
+static void WriteRAMFinish(gscomms * g);
 // 
 
-void set_mode(libusb_device_handle * dev, uint8_t mode) {
+void set_mode(gscomms * g, int mode) {
+  uint8_t mos_mode;
+
+  switch (mode) {
+    case GSCOMMS_MODE_CAREFUL:
+    case GSCOMMS_MODE_STANDARD:
+    case GSCOMMS_MODE_FAST:
+      mos_mode = MOS_SPP_MODE;
+      break;
+    case GSCOMMS_MODE_BULK:
+      fprintf(stderr, "bulk mode unsupported\n");
+      exit(-1);
+      break;
+    default:
+      fprintf(stderr, "mode #%d unsupported\n", mode);
+      exit(-1);
+      break;
+  }
+
+  g->mode = mode;
+
   int rc = libusb_control_transfer(
-      dev, 
+      g->dev, 
       REQTYPE_WRITE,
       REQ_MOS_WRITE,
-      MOS_PORT_BASE | mode,
+      MOS_PORT_BASE | mos_mode,
       MOS_PP_EXTENDED_CONTROL_REG,
       NULL,
       0,
@@ -64,14 +84,13 @@ void set_mode(libusb_device_handle * dev, uint8_t mode) {
     fprintf(stderr, "mode set failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
-
 }
 
 #if 0
-void get_clock(libusb_device_handle * dev) {
+void get_clock(gscomms * g) {
   unsigned char data;
   int rc = libusb_control_transfer(
-      dev,
+      g->dev,
       REQTYPE_READ,
       REQ_MOS_READ,
       MOS_PORT_BASE,
@@ -89,11 +108,11 @@ void get_clock(libusb_device_handle * dev) {
 }
 #endif
 
-uint8_t do_raw_read(libusb_device_handle * dev) {
+uint8_t do_raw_read(gscomms * g) {
   unsigned char data;
 
   int rc = libusb_control_transfer(
-      dev,
+      g->dev,
       REQTYPE_READ,
       REQ_MOS_READ,
       MOS_PORT_BASE,
@@ -110,10 +129,10 @@ uint8_t do_raw_read(libusb_device_handle * dev) {
   return data;
 }
 
-uint8_t do_read(libusb_device_handle * dev) {
+uint8_t do_read(gscomms * g) {
   unsigned char data;
 
-  data = do_raw_read(dev);
+  data = do_raw_read(g);
 
   if (data & 0x08) {
     return ((data^0x80)>>4)|0x10;
@@ -122,15 +141,16 @@ uint8_t do_read(libusb_device_handle * dev) {
   return 0;
 }
 
-void do_clear(libusb_device_handle * dev) {
-  do_write(dev, 0, 0);
+void do_clear(gscomms * g) {
+  do_write(g, 0, 0);
 }
 
-void do_write(libusb_device_handle * dev, uint8_t data,int flagged) {
+void do_write(gscomms * g, uint8_t data,int flagged) {
+
   uint8_t flagged_data = (flagged ? 0x10 : 0) | (data & 0xf);
 
   int rc = libusb_control_transfer(
-      dev,
+      g->dev,
       REQTYPE_WRITE,
       REQ_MOS_WRITE,
       MOS_PORT_BASE | flagged_data,
@@ -145,17 +165,20 @@ void do_write(libusb_device_handle * dev, uint8_t data,int flagged) {
   }
 }
 
-int writes_pending = 0;
-
 void do_write_async_cb(struct libusb_transfer * transfer) {
-  writes_pending --;
+  gscomms * g = transfer->user_data;
+  g->writes_pending --;
+  if (g->writes_pending < 0) {
+    fprintf(stderr, "writes pending underflow!\n");
+    exit(-1);
+  }
   if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
     fprintf(stderr, "async transfer failed: %d\n", transfer->status);
     exit(-1);
   }
 }
 
-void do_write_async(libusb_device_handle * dev, uint8_t data, int flagged) {
+void do_write_async(gscomms * g, uint8_t data, int flagged) {
   uint8_t flagged_data = (flagged ? 0x10 : 0) | (data & 0xf);
 
   struct libusb_transfer * transfer = libusb_alloc_transfer(0);
@@ -172,10 +195,10 @@ void do_write_async(libusb_device_handle * dev, uint8_t data, int flagged) {
 
   libusb_fill_control_transfer(
       transfer,
-      dev,
+      g->dev,
       setup_buffer,
       do_write_async_cb,
-      NULL,
+      g,
       TIMEOUT);
 
   transfer->flags |= LIBUSB_TRANSFER_FREE_TRANSFER;
@@ -187,74 +210,86 @@ void do_write_async(libusb_device_handle * dev, uint8_t data, int flagged) {
     fprintf(stderr, "submit async write failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
-  writes_pending ++;
+
+  g->writes_pending ++;
 }
 
-void do_clear_async(libusb_device_handle * dev) {
-  do_write_async(dev, 0, 0);
+void do_clear_async(gscomms * g) {
+  do_write_async(g, 0, 0);
 }
 
-void do_fast_write(libusb_device_handle *dev, uint8_t data) {
-  do_write(dev, data >> 4, 1);
-  do_write(dev, data, 0);
+void do_fast_write(gscomms * g, uint8_t data) {
+  do_write(g, data >> 4, 1);
+  do_write(g, data, 0);
 }
 
-unsigned char ReadWriteNibble(libusb_device_handle * dev, unsigned char x) {
+void do_fast_write_async(gscomms * g, uint8_t data) {
+  do_write_async(g, data >> 4, 1);
+  do_write_async(g, data, 0);
+}
+
+unsigned char ReadWriteNibble(gscomms * g, unsigned char x) {
   int spin[2] = {0,0};
-  do_write(dev, x & 0xf, 1);
+  do_write(g, x & 0xf, 1);
 
-  while ((do_read(dev)&0x10) == 0) spin[0]++;
+  while ((do_read(g)&0x10) == 0) spin[0]++;
 
-  unsigned char retval = do_read(dev)&0xf;
+  unsigned char retval = do_read(g)&0xf;
 
-  do_clear(dev);
+  do_clear(g);
 
-  while ((do_read(dev)&0x10) == 0x10) spin[1]++;
+  while ((do_read(g)&0x10) == 0x10) spin[1]++;
 
   return retval;
 
 }
 
-void WriteNibble(libusb_device_handle * dev, unsigned char x) {
-  //int spin[2] = {0,0};
-  do_write_async(dev, x & 0xf, 1);
-
-  //while ((do_read(dev)&0x10) == 0) spin[0]++;
-
-  do_clear_async(dev);
-
-  //while ((do_read(dev)&0x10) == 0x10) spin[1]++;
+void WriteNibble(gscomms * g, unsigned char x) {
+  if (g->async) {
+    do_write_async(g, x & 0xf, 1);
+    do_clear_async(g);
+  } else {
+    do_write(g, x & 0xf, 1);
+    do_clear(g);
+  }
 }
 
 
-unsigned char ReadWriteByte(libusb_device_handle * dev, unsigned char b) {
-  return (ReadWriteNibble(dev, b>>4)<<4)|ReadWriteNibble(dev, b);
+unsigned char ReadWriteByte(gscomms * g, unsigned char b) {
+  return (ReadWriteNibble(g, b>>4)<<4)|ReadWriteNibble(g, b);
 }
 
-void WriteByte(libusb_device_handle * dev, unsigned char b) {
-  WriteNibble(dev, b>>4);
-  WriteNibble(dev, b);
+void WriteByte(gscomms * g, unsigned char b) {
+  WriteNibble(g, b>>4);
+  WriteNibble(g, b);
+}
+void WriteByteFast(gscomms * g, unsigned char b) {
+  if (g->async) {
+      do_fast_write_async(g, b);
+  } else {
+      do_fast_write(g, b);
+  }
 }
 
-unsigned char ReadByte(libusb_device_handle * dev) {
-  return ReadWriteByte(dev, 0);
+unsigned char ReadByte(gscomms * g) {
+  return ReadWriteByte(g, 0);
 }
 
-unsigned long ReadWrite32(libusb_device_handle * dev, unsigned long v) {
-  return (((unsigned long)ReadWriteByte(dev, v>>24))<<24) |
-    (((unsigned long)ReadWriteByte(dev, v>>16))<<16) |
-    (((unsigned long)ReadWriteByte(dev, v>> 8))<< 8) |
-    ReadWriteByte(dev, v);
+unsigned long ReadWrite32(gscomms * g, unsigned long v) {
+  return (((unsigned long)ReadWriteByte(g, v>>24))<<24) |
+    (((unsigned long)ReadWriteByte(g, v>>16))<<16) |
+    (((unsigned long)ReadWriteByte(g, v>> 8))<< 8) |
+    ReadWriteByte(g, v);
 }
 
-void Write32(libusb_device_handle * dev, unsigned long v) {
-  WriteByte(dev, v>>24);
-  WriteByte(dev, v>>16);
-  WriteByte(dev, v>> 8);
-  WriteByte(dev, v);
+void Write32(gscomms * g, unsigned long v) {
+  WriteByte(g, v>>24);
+  WriteByte(g, v>>16);
+  WriteByte(g, v>> 8);
+  WriteByte(g, v);
 }
 
-int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
+int InitGSCommsNoisy(gscomms * g, int retries, int noisy) {
   int quiet = !noisy;
   if (!quiet) printf("Sync...\n");
 
@@ -266,17 +301,17 @@ int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
       .tv_nsec = 100*1000*1000
     };
 
-    do_write(dev, 3, 1);
+    do_write(g, 3, 1);
 
     nanosleep(&hundredms, NULL);
-    unsigned char result = do_read(dev)&0xf;
-    do_clear(dev);
+    unsigned char result = do_read(g)&0xf;
+    do_clear(g);
     nanosleep(&hundredms, NULL);
 
-    do_write(dev, 3, 1);
+    do_write(g, 3, 1);
     nanosleep(&hundredms, NULL);
-    result = (result << 4) | (do_read(dev)&0xf);
-    do_clear(dev);
+    result = (result << 4) | (do_read(g)&0xf);
+    do_clear(g);
     nanosleep(&hundredms, NULL);
 
 
@@ -289,26 +324,26 @@ int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
       printf("Sync got %02x != %02x, retrying\n", result, 'g');
     }
     // try to get back in sync
-    do_write(dev, 3, 1);
+    do_write(g, 3, 1);
     nanosleep(&hundredms, NULL);
-    do_clear(dev);
+    do_clear(g);
     nanosleep(&hundredms, NULL);
   }
 
   if (!got_it) {
     printf("Aborting sync\n");
-    do_clear(dev);
+    do_clear(g);
     return 0;
   }
 
-  return 1; //Handshake(dev, quiet);
+  return 1; //Handshake(g, quiet);
 }
 
-int Handshake(libusb_device_handle * dev, int quiet) {
+int Handshake(gscomms * g, int quiet) {
   if (!quiet) printf("Handshake...\n");
 
-  if (!(ReadWriteByte(dev, 'G') == 'g' && 
-        ReadWriteByte(dev, 'T') == 't')) {
+  if (!(ReadWriteByte(g, 'G') == 'g' && 
+        ReadWriteByte(g, 'T') == 't')) {
 
     fprintf(stderr, "Handshake Failed\n");
     return 0;
@@ -318,76 +353,75 @@ int Handshake(libusb_device_handle * dev, int quiet) {
   return 1;
 }
 
-void WriteHandshake(libusb_device_handle * dev) {
-  WriteByte(dev, 'G');
-  WriteByte(dev, 'T');
+void WriteHandshake(gscomms * g) {
+  WriteByte(g, 'G');
+  WriteByte(g, 'T');
 }
 
-int InitGSComms(libusb_device_handle * dev, int retries) {
-  //return InitGSCommsNoisy(dev, retries, 1);
-  return InitGSCommsNoisy(dev, retries, 0);
+int InitGSComms(gscomms * g, int retries) {
+  return InitGSCommsNoisy(g, retries, 0);
 }
 
-char * GetGSVersion(libusb_device_handle * dev) {
-  Handshake(dev, 1);
+char * GetGSVersion(gscomms * g) {
+  Handshake(g, 1);
 
-  ReadWriteByte(dev, 'f');
-  ReadByte(dev);
-  ReadByte(dev);
-  ReadByte(dev);
+  ReadWriteByte(g, 'f');
+  ReadByte(g);
+  ReadByte(g);
+  ReadByte(g);
 
-  unsigned char length = ReadByte(dev);
+  unsigned char length = ReadByte(g);
   char * vs = (char*)malloc(length+1);
   for (unsigned char i = 0; i < length; i++) {
-    vs[i] = ReadByte(dev);
+    vs[i] = ReadByte(g);
   }
   vs[length] = '\0';
 
   return vs;
 }
 
-unsigned char EndTransaction(libusb_device_handle * dev, unsigned char checksum) {
-  ReadWrite32(dev, 0);
-  ReadWrite32(dev, 0);
-  return ReadWriteByte(dev, checksum);
+unsigned char EndTransaction(gscomms * g, unsigned char checksum) {
+  ReadWrite32(g, 0);
+  ReadWrite32(g, 0);
+  return ReadWriteByte(g, checksum);
 }
 
-void ReadRAM(libusb_device_handle * dev, unsigned char *buf, unsigned long address, unsigned long length) {
-  Handshake(dev, 1);
+void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length) {
+  Handshake(g, 1);
 
-  ReadWriteByte(dev, 1);
-  ReadWrite32(dev, address);
-  ReadWrite32(dev, length);
+  ReadWriteByte(g, 1);
+  ReadWrite32(g, address);
+  ReadWrite32(g, length);
 
   for (unsigned long i = 0; i < length; i++) {
     if (buf) {
-      buf[i] = ReadByte(dev);
+      buf[i] = ReadByte(g);
     } else {
-      ReadByte(dev);
+      ReadByte(g);
     }
   }
 
-  EndTransaction(dev, 0);
+  EndTransaction(g, 0);
 }
 
-void WriteRAM(libusb_context * ctx, libusb_device_handle * dev, const unsigned char *buf, unsigned long address, unsigned long length) {
-  WriteRAMStart(ctx, dev, address, length);
+void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length) {
+  WriteRAMStart(g, address, length);
 
   printf("Uploading to %x\n", (int)address);
 
   for (unsigned long i = 0; i < length; i++) {
-    WriteRAMByte(ctx, dev, buf[i]);
+    WriteRAMByte(g, buf[i]);
 
     if ((i % 1000) == 0) {
       printf("%lu %2lu%%\n", i, i*100/length);
-      HandleEvents(ctx, dev, 0);
+      HandleEvents(g, 0);
     }
   }
 
-  WriteRAMFinish(ctx, dev);
+  WriteRAMFinish(g);
 }
 
-void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
+void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length) {
   if (length == (unsigned long)-1) {
     fseek(infile, 0, SEEK_END);
     length = ftell(infile);
@@ -403,7 +437,7 @@ void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * i
     return;
   }
 
-  WriteRAMStart(ctx, dev, address, length);
+  WriteRAMStart(g, address, length);
 
   printf("Uploading to %x\n", (int)address);
 
@@ -415,150 +449,128 @@ void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * i
       exit(-1);
     }
 
-    WriteRAMByte(ctx, dev, (unsigned char)c);
+    WriteRAMByte(g, (unsigned char)c);
 
     if ((i % 1000) == 0) {
       printf("%lu %2lu%%\n", i, i*100/length);
-      HandleEvents(ctx, dev, 0);
+      HandleEvents(g, 0);
     }
   }
 
-  WriteRAMFinish(ctx, dev);
+  WriteRAMFinish(g);
 }
 
-void FastWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
-  if (length == (unsigned long)-1) {
-    fseek(infile, 0, SEEK_END);
-    length = ftell(infile);
-    fseek(infile, 0, SEEK_SET);
+static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length) {
+  Handshake(g, 1);
 
-    if (length == -1) {
-      perror("failed getting file length");
-      exit(-1);
-    }
-  }
+  ReadWriteByte(g, 2);
+  ReadWrite32(g, address);
+  ReadWrite32(g, length);
 
-  if (length < 1) {
-    return;
-  }
-
-  Handshake(dev, 1);
-
-  ReadWriteByte(dev, 2);
-  ReadWrite32(dev, address);
-  Write32(dev, length);
- 
-#if 0
-  do_clear(dev);
-
-  set_mode(dev, MOS_FIFO_MODE);
-#endif
-
-  printf("Fast Uploading %lu bytes to %x\n", length, (int)address);
-
-  for (unsigned long i = 0; i < length; i++) {
-    int c;
-
-    c = fgetc(infile);
-
-    if (c == EOF) {
-      fprintf(stderr, "hit EOF before writing all bytes\n");
+  if (g->async ) {
+    if (g->writes_pending != 0) {
+      fprintf(stderr, "%d writes pending when starting a new write\n", g->writes_pending);
       exit(-1);
     }
 
-   if (i % 1024 == 0) {
-      printf("%lu %2lu%%\n", i, i*100/length);
+    //HandleEvents(g, 0);
+  }
+}
+
+void HandleEvents(gscomms * g, long timeout_ms) {
+  if (g->async) {
+    struct timeval tv = {
+      .tv_sec = 0,
+      .tv_usec = timeout_ms*1000
+    };
+    libusb_handle_events_timeout(g->ctx, &tv);
+  }
+}
+
+static void WriteRAMByte(gscomms * g, unsigned char b) {
+    switch (g->mode) {
+      case GSCOMMS_MODE_CAREFUL:
+        ReadWriteByte(g, b);
+        break;
+      case GSCOMMS_MODE_STANDARD:
+        WriteByte(g, b);
+        break;
+      case GSCOMMS_MODE_FAST:
+        WriteByteFast(g, b);
+        break;
     }
-
-    do_fast_write(dev, (unsigned char)c);
-  }
-
-  printf("%lu %2lu%%\n", length, 100ul);
-
-  EndTransaction(dev, 0);
 }
 
-static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length) {
-  Handshake(dev, 1);
+static void WriteRAMFinish(gscomms * g) {
+  if (g->async) {
+    while (g->writes_pending > 0) {
+      static const struct timespec hundredms = {
+        .tv_sec = 0,
+        .tv_nsec = 100*1000*1000
+      };
+      nanosleep(&hundredms, NULL);
 
-  ReadWriteByte(dev, 2);
-  ReadWrite32(dev, address);
-  ReadWrite32(dev, length);
+      HandleEvents(g, TIMEOUT);
 
-  if (writes_pending != 0) {
-    fprintf(stderr, "%d writes are still pending when starting a new write\n", writes_pending);
-    exit(-1);
-  }
-
-  //HandleEvents(ctx, dev, 0);
-}
-
-void HandleEvents(libusb_context * ctx, libusb_device_handle * dev, long timeout_ms) {
-  struct timeval tv = {
-    .tv_sec = 0,
-    .tv_usec = timeout_ms*1000
-  };
-  libusb_handle_events_timeout(ctx, &tv);
-}
-
-static void WriteRAMByte(libusb_context * ctx, libusb_device_handle * dev, unsigned char b) {
-    WriteByte(dev, b);
-}
-
-static void WriteRAMFinish(libusb_context *ctx, libusb_device_handle * dev) {
-  while (writes_pending > 0) {
-    HandleEvents(ctx, dev, TIMEOUT);
-
-    if (writes_pending > 0) {
-      printf("waiting on %d writes\n", writes_pending);
+      if (g->writes_pending > 0) {
+        printf("waiting on %d writes\n", g->writes_pending);
+      }
     }
   }
 
-  EndTransaction(dev, 0);
+  EndTransaction(g, 0);
 }
 
-void Disconnect(libusb_device_handle * dev) {
-  Handshake(dev, 1);
-  ReadWriteByte(dev, 'd');
+void Disconnect(gscomms * g) {
+  Handshake(g, 1);
+  ReadWriteByte(g, 'd');
 }
 
 ///
 
-void setup_libusb(libusb_context ** ctx, libusb_device_handle ** dev) {
+gscomms * setup_gscomms() {
   int rc;
 
-  rc = libusb_init(ctx);
+  gscomms * g = malloc(sizeof(gscomms));
+
+  rc = libusb_init(&g->ctx);
   if (rc != 0) {
     fprintf(stderr, "libusb_init failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
 
-  *dev = libusb_open_device_with_vid_pid(*ctx, VENDOR_ID, PRODUCT_ID);
+  g->dev = libusb_open_device_with_vid_pid(g->ctx, VENDOR_ID, PRODUCT_ID);
 
-  if (!*dev) {
+  if (!g->dev) {
     fprintf(stderr, "failed to locate/open device\n");
     exit(-1);
   }
 
-  rc = libusb_claim_interface(*dev, 0);
+  rc = libusb_claim_interface(g->dev, 0);
   if (rc != 0) {
     fprintf(stderr, "claim failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
 
-  set_mode(*dev, MOS_SPP_MODE);
+
+  set_mode(g, GSCOMMS_MODE_STANDARD);
+
+  g->async = 1;
+  g->writes_pending = 0;
+
+  return g;
 }
 
 ///
 
-void cleanup_libusb(libusb_context * ctx, libusb_device_handle * dev) {
+void cleanup_gscomms(gscomms * g) {
   int rc;
 
-  rc = libusb_release_interface(dev, 0);
+  rc = libusb_release_interface(g->dev, 0);
   if (rc != 0) {
     fprintf(stderr, "release failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
 
-  libusb_exit(ctx);
+  libusb_exit(g->ctx);
 }

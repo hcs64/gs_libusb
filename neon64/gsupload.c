@@ -6,20 +6,19 @@
 // ***********
 
 int main(int argc, char ** argv) { 
-  libusb_context * ctx = NULL;
-  libusb_device_handle * dev = NULL;
+  gscomms * g = NULL;
 
-  setup_libusb(&ctx, &dev);
+  g = setup_gscomms();
 
   ///
-  if (!InitGSCommsNoisy(dev, RETRIES, 1)) {
+  if (!InitGSCommsNoisy(g, RETRIES, 1)) {
     fprintf(stderr, "init failed\n");
     exit(-1);
   }
 
   // check for Neon64 already present
   unsigned char check_sig[4] = {0xff,0xff,0xff,0xff};
-  ReadRAM(dev, check_sig, 0x80000400UL, 4);
+  ReadRAM(g, check_sig, 0x80000400UL, 4);
 
   if (check_sig[0] != 0x10 || check_sig[1] != 0x00)
   {
@@ -43,21 +42,21 @@ int main(int argc, char ** argv) {
     fclose(infile);
 
     printf("sending Neon64...\n");
-    WriteRAM(ctx, dev, data, 0x80300000, size);
+    WriteRAM(g, data, 0x80300000, size);
     printf("done!\n");
 
     free(data);
 
     unsigned char patch_data[4] = {0x8,0xc,0,0};
 
-    WriteRAM(ctx, dev, patch_data, 0x80263844UL, 4);
+    WriteRAM(g, patch_data, 0x80263844UL, 4);
 
-    Disconnect(dev);
+    Disconnect(g);
 
     printf("hit enter when Neon64 is running\n");
     getchar();
 
-    InitGSComms(dev, RETRIES);
+    InitGSComms(g, RETRIES);
   } else {
     printf("Neon64 already loaded.\n");
   }
@@ -81,16 +80,15 @@ int main(int argc, char ** argv) {
     }
     fclose(infile);
 
-    WriteRAM(ctx, dev, data, 0x80300000, size);
+    WriteRAM(g, data, 0x80300000, size);
 
     free(data);
   }
 
-  Disconnect(dev);
+  Disconnect(g);
  
-  cleanup_libusb(ctx, dev);
-  dev = NULL;
-  ctx = NULL;
+  cleanup_gscomms(g);
+  g = NULL;
 
   return 0;
 }

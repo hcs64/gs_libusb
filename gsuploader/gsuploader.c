@@ -5,15 +5,18 @@
 #include <arpa/inet.h>  // for htons
 #include <unistd.h>
 
+// TODO:
+// - instr cache invalidate all embedded code in loader
+
 #include "mips.h"
 #include "gscomms.h"
 
-int upload_embedded(libusb_device_handle *dev);
-int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
-int UploadFast(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
-int run(libusb_device_handle * dev, unsigned long addr);
-void patch_fast_receive(libusb_device_handle * dev);
-void unpatch_fast_receive(libusb_device_handle * dev);
+int upload_embedded(gscomms * g);
+int Upload(gscomms * g, const unsigned char * buffer, unsigned long size, unsigned long address);
+int UploadFast(gscomms * g, const unsigned char * buffer, unsigned long size, unsigned long address);
+int run(gscomms * g, unsigned long addr);
+void patch_fast_receive(gscomms * g);
+void unpatch_fast_receive(gscomms * g);
 
 #define UPLOAD_ADDR 0xA0000400UL 
 #define ENTRYPOINT  0x80000400UL
@@ -242,9 +245,7 @@ embedded_code embedded_codes[] = {
 
 int main(int argc, char ** argv)
 {
-
-  libusb_context * ctx;
-  libusb_device_handle * dev;
+  gscomms * g;
 
   printf("\nN64 HomeBrew Loader - ppcasm (Based on HCS GSUpload)\n");
   printf("MCS7705 USB version via libusb\n\n");
@@ -255,11 +256,11 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  setup_libusb(&ctx, &dev);
+  g = setup_gscomms();
 
-  if (!InitGSCommsNoisy(dev, RETRIES, 1)) {
+  if (!InitGSCommsNoisy(g, RETRIES, 1)) {
     printf("Init failed\n");
-    do_clear(dev);
+    do_clear(g);
     return 1;
   }
 
@@ -267,88 +268,91 @@ int main(int argc, char ** argv)
   if(!infile)
   {
     printf("error opening %s\n", argv[1]);
-    do_clear(dev);
+    do_clear(g);
     return 1;
   }
 
-  upload_embedded(dev);
+  upload_embedded(g);
 
 #if 1
   printf("Patching in modified loader...\n");
-  patch_fast_receive(dev);
+  patch_fast_receive(g);
+
+  set_mode(g, GSCOMMS_MODE_FAST);
 
 #if 1
-  Disconnect(dev);
+  Disconnect(g);
   sleep(1); // might take a little bit for the instruction cache to turn over
-  InitGSComms(dev, RETRIES);
+  InitGSComms(g, RETRIES);
   printf("Done.\n");
 #endif
 
-  printf("Ok, now try loading...\n");
 #endif
 
-#if 1
+  printf("Ok, now try loading...\n");
   /*Upload binary to specified address.*/
 
-  FastWriteRAMfromFile(dev, infile, UPLOAD_ADDR, -1);
+  WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
   fclose(infile);
-#endif
 
   printf("Load finished.\n");
 
 #if 0
   printf("Patching out modified loader...\n");
-  //InitGSCommsNoisy(dev, RETRIES, 1);
-  unpatch_fast_receive(dev);
+  //InitGSCommsNoisy(g, RETRIES, 1);
+  unpatch_fast_receive(g);
 #if 1
-  Disconnect(dev);
+  Disconnect(g);
   sleep(1);
-  InitGSCommsNoisy(dev, RETRIES, 1);
+  InitGSCommsNoisy(g, RETRIES, 1);
 #endif
   printf("Done.\n");
 #endif
 
-  run(dev, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
-  Disconnect(dev);
+  run(g, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
+  Disconnect(g);
 
-  do_clear(dev);
+  do_clear(g);
 
   printf("Done.\n");
 
-  cleanup_libusb(ctx, dev);
+  cleanup_gscomms(g);
+  g = NULL;
 
   return 0;
 }
 
-void patch_fast_receive(libusb_device_handle * dev) {
+void patch_fast_receive(gscomms * g) {
   unsigned long addr = embedded_codes[FAST_RECEIVE_GOT_IDX].ram_address;
 
   unsigned long jal = JAL(addr);
   unsigned char insn[4];
   write32BE(insn, jal);
 
-  if(Upload(dev, insn, 4, 0xA07919B0))
+  if(Upload(g, insn, 4, 0xA07919B0))
   {  
     printf("Fast patch failed...\n");
-    do_clear(dev);
+    do_clear(g);
     exit(-1);
   }
 }
 
-void unpatch_fast_receive(libusb_device_handle * dev) {
+#if 0
+void unpatch_fast_receive(gscomms * g) {
   unsigned long jal = 0x0c1e1f57;
   unsigned char insn[4];
   write32BE(insn, jal);
 
-  if(UploadFast(dev, insn, 4, 0xA07919B0))
+  if(UploadFast(g, insn, 4, 0xA07919B0))
   {  
     printf("Fast unpatch failed...\n");
-    do_clear(dev);
+    do_clear(g);
     exit(-1);
   }
 }
+#endif
 
-int upload_embedded(libusb_device_handle *dev)
+int upload_embedded(gscomms * g)
 {
   printf("\nDbg: Function Callbacks:\n");
   printf("\nGlobal Offset Table base address: %lx\n", GLOBAL_OFFSET_TABLE);
@@ -370,10 +374,10 @@ int upload_embedded(libusb_device_handle *dev)
     }
 
     /*Upload embedded code */
-    if(Upload(dev, (unsigned char *)ecp->codebuf, ecp->size, embed_addr))
+    if(Upload(g, (unsigned char *)ecp->codebuf, ecp->size, embed_addr))
     {
       printf("Failed to upload embedded code %s...\n", ecp->name);
-      do_clear(dev);
+      do_clear(g);
       return 1;
     }
 
@@ -386,7 +390,7 @@ int upload_embedded(libusb_device_handle *dev)
     write32BE(GOT_buf, J(embed_addr));
     write32BE(GOT_buf+8, JAL(embed_addr));
 
-    if(Upload(dev, GOT_buf, GOT_ENTRY_SIZE, got_addr))
+    if(Upload(g, GOT_buf, GOT_ENTRY_SIZE, got_addr))
     {  
       printf("GOT patch failed...\n");
       return 1;    
@@ -402,63 +406,63 @@ int upload_embedded(libusb_device_handle *dev)
   return 0;
 }
 
-int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address) {
+int Upload(gscomms * g, const unsigned char * buffer, unsigned long size, unsigned long address) {
   unsigned long c=0;
 
-  Handshake(dev, 1);
-  ReadWriteByte(dev, 2);
-  ReadWrite32(dev, address);
-  ReadWrite32(dev, size);
+  Handshake(g, 1);
+  ReadWriteByte(g, 2);
+  ReadWrite32(g, address);
+  ReadWrite32(g, size);
 
-  for (c=0; c < size; c++) ReadWriteByte(dev, buffer[c]);
+  for (c=0; c < size; c++) ReadWriteByte(g, buffer[c]);
 
-  EndTransaction(dev, 0);
+  EndTransaction(g, 0);
 
 #if 0
   // verify
 
-  Handshake(dev, 1);
-  ReadWriteByte(dev, 1);
-  ReadWrite32(dev, address);
-  ReadWrite32(dev, size);
+  Handshake(g, 1);
+  ReadWriteByte(g, 1);
+  ReadWrite32(g, address);
+  ReadWrite32(g, size);
 
   for (c=0; c < size; c++) {
-    unsigned char b = ReadByte(dev);
+    unsigned char b = ReadByte(g);
     if (b != buffer[c]) {
       fprintf(stderr, "Verify error at 0x%lx, %02x != %02x\n", address+c, b, buffer[c]);
     }
   }
 
-  EndTransaction(dev, 0);
+  EndTransaction(g, 0);
 #endif
 
   return 0;
 }
 
-int UploadFast(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address) {
+int UploadFast(gscomms * g, const unsigned char * buffer, unsigned long size, unsigned long address) {
   unsigned long c=0;
 
-  Handshake(dev, 1);
-  ReadWriteByte(dev, 2);
-  ReadWrite32(dev, address);
-  ReadWrite32(dev, size);
+  Handshake(g, 1);
+  ReadWriteByte(g, 2);
+  ReadWrite32(g, address);
+  ReadWrite32(g, size);
 
   for (c=0; c < size; c++) {
-    do_write(dev, buffer[c] >> 4, 1);
-    do_write(dev, buffer[c], 0);
+    do_write(g, buffer[c] >> 4, 1);
+    do_write(g, buffer[c], 0);
   }
 
-  EndTransaction(dev, 0);
+  EndTransaction(g, 0);
 
   return 0;
 }
 
-int run(libusb_device_handle * dev, unsigned long addr) {
+int run(gscomms * g, unsigned long addr) {
   /*Make synthetic jump instruction based on address.*/
   unsigned long instruction=J(addr);
 
   unsigned char check_sig[4] = {0xff,0xff,0xff,0xff};
-  ReadRAM(dev, check_sig, INSN_PATCH_ADDR, 4);
+  ReadRAM(g, check_sig, INSN_PATCH_ADDR, 4);
   printf("patching 0x%08lx %02x%02x%02x%02x->%08lx\n", INSN_PATCH_ADDR, check_sig[0], check_sig[1], check_sig[2], check_sig[3], instruction);
 
   /*Unload jump instruction into byte buffer for easy transfer.*/
@@ -466,10 +470,12 @@ int run(libusb_device_handle * dev, unsigned long addr) {
   write32BE(insn, instruction);
 
   /*Inject synthetic jump instruction into code handler to ensure it runs.*/
-  if(UploadFast(dev, insn, 4, INSN_PATCH_ADDR))
+  if(
+    (g->mode == GSCOMMS_MODE_FAST && UploadFast(g, insn, 4, INSN_PATCH_ADDR)) ||
+    (g->mode != GSCOMMS_MODE_FAST && Upload(g, insn, 4, INSN_PATCH_ADDR)))
   {  
     printf("Instruction patch failed...\n");
-    do_clear(dev);
+    do_clear(g);
     return 1;    
   }
 

@@ -4,45 +4,59 @@
 #include <stdint.h>
 #include <libusb-1.0/libusb.h>
 
+typedef struct {
+  libusb_context * ctx;
+  libusb_device_handle * dev;
+
+  int async;
+  int mode;
+  int writes_pending;
+} gscomms;
+
+enum {
+  GSCOMMS_MODE_CAREFUL,
+  GSCOMMS_MODE_STANDARD,
+  GSCOMMS_MODE_FAST,
+  GSCOMMS_MODE_BULK,
+};
+
 static const int RETRIES = 5;
 
 // hardware I/O
-uint8_t do_read(libusb_device_handle * dev);
-uint8_t do_raw_read(libusb_device_handle * dev);
-void do_clear(libusb_device_handle * dev);
-void do_write(libusb_device_handle * dev, uint8_t data, int flagged);
+uint8_t do_read(gscomms * g);
+uint8_t do_raw_read(gscomms * g);
+void do_clear(gscomms * g);
+void do_write(gscomms * g, uint8_t data, int flagged);
 
 // GS low-level operations
-int InitGSComms(libusb_device_handle * dev, int retries);
-int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy);
-int Handshake(libusb_device_handle * dev, int quiet);
-void WriteHandshake(libusb_device_handle * dev);
-unsigned char ReadWriteNibble(libusb_device_handle * dev, unsigned char x);
-void WriteNibble(libusb_device_handle * dev, unsigned char x);
-void Disconnect(libusb_device_handle * dev);
+void set_mode(gscomms * g, int mode);
+int InitGSComms(gscomms * g, int retries);
+int InitGSCommsNoisy(gscomms * g, int retries, int noisy);
+int Handshake(gscomms * g, int quiet);
+void WriteHandshake(gscomms * g);
+unsigned char ReadWriteNibble(gscomms * g, unsigned char x);
+void WriteNibble(gscomms * g, unsigned char x);
+void Disconnect(gscomms * g);
 
 // higher...
-unsigned char ReadWriteByte(libusb_device_handle * dev, unsigned char b);
-void WriteByte(libusb_device_handle * dev, unsigned char b);
-unsigned char ReadByte(libusb_device_handle * dev);
-unsigned long ReadWrite32(libusb_device_handle * dev, unsigned long v);
-void Write32(libusb_device_handle * dev, unsigned long v);
-unsigned char EndTransaction(libusb_device_handle * dev, unsigned char checksum);
+unsigned char ReadWriteByte(gscomms * g, unsigned char b);
+void WriteByte(gscomms * g, unsigned char b);
+unsigned char ReadByte(gscomms * g);
+unsigned long ReadWrite32(gscomms * g, unsigned long v);
+void Write32(gscomms * g, unsigned long v);
+unsigned char EndTransaction(gscomms * g, unsigned char checksum);
 
 // basic GS commands
-char * GetGSVersion(libusb_device_handle * dev);
-void ReadRAM(libusb_device_handle * dev, unsigned char *buf, unsigned long address, unsigned long length);
-void WriteRAM(libusb_context * ctx, libusb_device_handle * dev, const unsigned char *buf, unsigned long address, unsigned long length);
-void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length);
+char * GetGSVersion(gscomms * g);
+void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length);
+void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length);
+void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length);
 
 // do outstanding asynchronous processing for libusb
-void HandleEvents(libusb_context * ctx, libusb_device_handle * dev, long timeout_ms);
-
-// experimental, requires the loader to be patched
-void FastWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length);
+void HandleEvents(gscomms * g, long timeout_ms);
 
 // overall setup of device
-void setup_libusb(libusb_context ** ctx, libusb_device_handle ** dev);
-void cleanup_libusb(libusb_context * ctx, libusb_device_handle * dev);
+gscomms * setup_gscomms();
+void cleanup_gscomms(gscomms * g);
 
 #endif  // _GSCOMMS_H
