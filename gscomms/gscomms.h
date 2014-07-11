@@ -8,6 +8,7 @@ static const int RETRIES = 20;
 
 // hardware I/O
 uint8_t do_read(libusb_device_handle * dev);
+uint8_t do_raw_read(libusb_device_handle * dev);
 void do_clear(libusb_device_handle * dev);
 void do_write(libusb_device_handle * dev, uint8_t data, int flagged);
 

@@ -226,6 +226,34 @@ unsigned long codebuf_check_gsbutton[] = {
   CACHE(A1, CACH_PI|CACHE_IINV, 0x19B0),
 #endif
 
+#define PROMPT_PULSE 50
+#define ACK_PULSE 10
+//              /ERROR  /BUSY   /ACK
+// 0x18 = 0x08    1       0       0
+// 0x10 = 0x88    1       1       0
+// 0x1C = 0x48    1       0       1
+// 0x14 = 0xC8    1       1       1
+
+// PHASE0 = 0x14, PHASE2 = 0x10, PHASE3 = 0x14 works
+
+#define PHASE0 0x14
+
+#define SIMULATE_PROMPT             \
+  JAL(0x80787C24),                  \
+  ORI(A0, R0, PHASE0)
+
+#define PHASE2 0x10
+#define PHASE3 0x1C
+
+#define SIMULATE_ACK                \
+  JAL(0x80787C24),                  \
+  ORI(A0, R0, PHASE2),              \
+  ORI(A0, A0, ACK_PULSE),           \
+  BNE(A0, R0, -1*4),                \
+  ADDIU(A0, A0, -1),                \
+  JAL(0x80787C24),                  \
+  ORI(A0, R0, PHASE3)
+
 unsigned long codebuf_fifo_receive[] = {
   /* Function: FIFO receive byte */
   ADDIU(SP, SP, 0xFFE0),
@@ -237,6 +265,8 @@ unsigned long codebuf_fifo_receive[] = {
   ADDIU(V0, R0, 0xfffe),
   MIPS_AND(V0, S1, V0),
   MTC0(V0, 12),
+
+  SIMULATE_PROMPT,
 
   /* wait for high nibble */
   JAL(0x80787C88),
@@ -253,43 +283,18 @@ unsigned long codebuf_fifo_receive[] = {
   /* collect the nibble */
   ANDI(S0, V0, 0xF),
   SLL(S0, S0, 4),
-#if 0
-  /* reenable interrupts */
-  MTC0(MIPS_S1, 12),
 
-  NOP, NOP, NOP, NOP,
+  SIMULATE_ACK,
 
-  /* disable interrupts */
-  ADDIU(V0, R0, 0xfffe),
-  MIPS_AND(V0, S1, V0),
-  MTC0(S0, 12),
-#endif
+  SIMULATE_PROMPT,
 
-#if 0
-  /* set the busy signal and nACK */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x48),
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  /* clear the busy signal, clear nACK */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x00),
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  /* put nACK back up */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x40),
-#endif
    /* wait for low nibble */
   JAL(0x80787C88),
   NOP,
   ANDI(V0, V0, 0x10),
   BNE(V0, R0, -4*4),
   NOP,
+
   /* wait again (debounce) */
   JAL(0x80787C88),
   NOP,
@@ -298,25 +303,9 @@ unsigned long codebuf_fifo_receive[] = {
   /* collect the nibble */
   ANDI(V0, V0, 0xF),
   OR(S0, V0, S0),
-#if 0
-  /* set the busy signal and nACK */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x48),
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  /* clear the busy signal, clear nACK */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x00),
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  NOP, NOP, NOP, NOP, NOP, NOP, NOP, NOP,
-  /* put nACK back up */
-  JAL(0x80787C24),
-  ORI(A0, R0, 0x40),
-#endif
+
+  SIMULATE_ACK,
+
   /* load return value */
   OR(V0, S0, R0),
   /* restore saved regs */
@@ -391,6 +380,7 @@ int main(int argc, char ** argv)
   Disconnect(dev);
   sleep(2); // might take a little bit for the instruction cache to turn over
   InitGSComms(dev, RETRIES);
+  printf("Done.\n");
 
   printf("Ok, now try loading...\n");
 #endif
@@ -402,11 +392,16 @@ int main(int argc, char ** argv)
   fclose(infile);
 #endif
 
+  printf("Load finished.\n");
+
 #if 1
+  printf("Patching out modified loader...\n");
+  InitGSCommsNoisy(dev, RETRIES, 1);
   unpatch_FIFO_receive(dev);
   Disconnect(dev);
   sleep(1);
   InitGSCommsNoisy(dev, RETRIES, 1);
+  printf("Done.\n");
 #endif
 
   run(dev, embedded_codes[DETACH_GS_GOT_IDX].ram_address);

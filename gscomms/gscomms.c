@@ -89,7 +89,7 @@ void get_clock(libusb_device_handle * dev) {
 }
 #endif
 
-uint8_t do_read(libusb_device_handle * dev) {
+uint8_t do_raw_read(libusb_device_handle * dev) {
   unsigned char data;
 
   int rc = libusb_control_transfer(
@@ -106,6 +106,14 @@ uint8_t do_read(libusb_device_handle * dev) {
     fprintf(stderr, "read failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
+
+  return data;
+}
+
+uint8_t do_read(libusb_device_handle * dev) {
+  unsigned char data;
+
+  data = do_raw_read(dev);
 
   if (data & 0x08) {
     return ((data^0x80)>>4)|0x10;
@@ -189,9 +197,6 @@ void do_clear_async(libusb_device_handle * dev) {
 // trying to coerce the device into doing a bulk mode transfer
 void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
 
-  // set into the correct mode
-  set_mode(dev, MOS_FIFO_MODE);
-
   const int max_len = 16;
   uint8_t buf[max_len];
   const int bytes_per_buf = 16/2;
@@ -209,7 +214,7 @@ void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) 
 
     int transferred;
 
-    printf("transfer call start\n");
+    //printf("transfer call start\n");
     int rc = libusb_bulk_transfer(
         dev,
         ENDPOINT_MOS_BULK_WRITE,
@@ -217,23 +222,24 @@ void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) 
         todo * 2,
         &transferred,
         10*1000);
-    printf("transfer call finished\n");
+    //printf("transfer call finished\n");
 
     if (rc != 0) {
       fprintf(stderr, "bulk write failed: %s\n", libusb_error_name(rc));
+      do_clear(dev);
+      set_mode(dev, MOS_SPP_MODE);
       exit(-1);
     }
     if (transferred != todo * 2) {
       fprintf(stderr, "short bulk write %d != %d\n", todo*2, transferred);
+      do_clear(dev);
+      set_mode(dev, MOS_SPP_MODE);
       exit(-1);
     }
 
     length -= transferred/2;
     data += transferred/2;
   }
-
-  set_mode(dev, MOS_SPP_MODE);
-
 }
 
 void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
@@ -258,7 +264,9 @@ void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int leng
 
     for (int i = 0; i < todo; i++) {
       do_write(dev, data[i] >> 4, 1);
+      printf("%02x", do_raw_read(dev));
       do_write(dev, data[i], 0);
+      printf("%02x", do_raw_read(dev));
     }
 
     length -= todo;
@@ -313,6 +321,13 @@ unsigned long ReadWrite32(libusb_device_handle * dev, unsigned long v) {
     (((unsigned long)ReadWriteByte(dev, v>>16))<<16) |
     (((unsigned long)ReadWriteByte(dev, v>> 8))<< 8) |
     ReadWriteByte(dev, v);
+}
+
+void Write32(libusb_device_handle * dev, unsigned long v) {
+  WriteByte(dev, v>>24);
+  WriteByte(dev, v>>16);
+  WriteByte(dev, v>> 8);
+  WriteByte(dev, v);
 }
 
 int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
@@ -502,8 +517,13 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
 
   ReadWriteByte(dev, 2);
   ReadWrite32(dev, address);
-  ReadWrite32(dev, length);
+  //ReadWrite32(dev, length);
+  Write32(dev, length);
  
+  do_clear(dev);
+
+  set_mode(dev, MOS_FIFO_MODE);
+
   printf("Bulk Uploading %lu bytes to %x\n", length, (int)address);
 
   for (unsigned long i = 0; i < length; ) {
@@ -525,16 +545,24 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
       printf("%lu %2lu%%\n", i, i*100/length);
     }
 
-    do_sim_bulk_write(dev, buf, todo);
+    do_bulk_write(dev, buf, todo);
 
     i += todo;
   }
 
   printf("%lu %2lu%%\n", length, 100ul);
 
-  printf("Ending...\n");
-  EndTransaction(dev, 0);
-  printf("Ended.\n");
+  set_mode(dev, MOS_SPP_MODE);
+
+  //printf("Ending...\n");
+
+  // need to manually send the bytes here as the first one will have a
+  // bad flag leftover from FIFO mode, WriteByte ignores these
+  for (int i = 0; i < 9; i++) {
+    WriteByte(dev, 0);
+  }
+  //EndTransaction(dev, 0);
+  //printf("Ended.\n");
 }
 
 static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length) {
