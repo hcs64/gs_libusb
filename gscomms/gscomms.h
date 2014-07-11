@@ -16,6 +16,7 @@ void do_write(libusb_device_handle * dev, uint8_t data, int flagged);
 int InitGSComms(libusb_device_handle * dev, int retries);
 int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy);
 int Handshake(libusb_device_handle * dev, int quiet);
+void WriteHandshake(libusb_device_handle * dev);
 unsigned char ReadWriteNibble(libusb_device_handle * dev, unsigned char x);
 void WriteNibble(libusb_device_handle * dev, unsigned char x);
 void Disconnect(libusb_device_handle * dev);
@@ -25,6 +26,7 @@ unsigned char ReadWriteByte(libusb_device_handle * dev, unsigned char b);
 void WriteByte(libusb_device_handle * dev, unsigned char b);
 unsigned char ReadByte(libusb_device_handle * dev);
 unsigned long ReadWrite32(libusb_device_handle * dev, unsigned long v);
+void Write32(libusb_device_handle * dev, unsigned long v);
 unsigned char EndTransaction(libusb_device_handle * dev, unsigned char checksum);
 
 // basic GS commands

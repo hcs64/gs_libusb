@@ -199,7 +199,7 @@ void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) 
 
   const int max_len = 16;
   uint8_t buf[max_len];
-  const int bytes_per_buf = 16/2;
+  const int bytes_per_buf = max_len/2;
 
   while (length > 0) {
     int todo = bytes_per_buf;
@@ -394,6 +394,11 @@ int Handshake(libusb_device_handle * dev, int quiet) {
   return 1;
 }
 
+void WriteHandshake(libusb_device_handle * dev) {
+  WriteByte(dev, 'G');
+  WriteByte(dev, 'T');
+}
+
 int InitGSComms(libusb_device_handle * dev, int retries) {
   //return InitGSCommsNoisy(dev, retries, 1);
   return InitGSCommsNoisy(dev, retries, 0);
@@ -517,7 +522,6 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
 
   ReadWriteByte(dev, 2);
   ReadWrite32(dev, address);
-  //ReadWrite32(dev, length);
   Write32(dev, length);
  
   do_clear(dev);

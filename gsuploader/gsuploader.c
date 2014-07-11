@@ -226,24 +226,22 @@ unsigned long codebuf_check_gsbutton[] = {
   CACHE(A1, CACH_PI|CACHE_IINV, 0x19B0),
 #endif
 
-#define PROMPT_PULSE 50
-#define ACK_PULSE 10
+#define DEBOUNCE_COUNT 10
+#define ACK_PULSE 50
 //              /ERROR  /BUSY   /ACK
 // 0x18 = 0x08    1       0       0
 // 0x10 = 0x88    1       1       0
 // 0x1C = 0x48    1       0       1
 // 0x14 = 0xC8    1       1       1
 
-// PHASE0 = 0x14, PHASE2 = 0x10, PHASE3 = 0x14 works
-
-#define PHASE0 0x14
+#define PHASE1 0x14
 
 #define SIMULATE_PROMPT             \
   JAL(0x80787C24),                  \
-  ORI(A0, R0, PHASE0)
+  ORI(A0, R0, PHASE1)
 
 #define PHASE2 0x10
-#define PHASE3 0x1C
+#define PHASE3 0x00
 
 #define SIMULATE_ACK                \
   JAL(0x80787C24),                  \
@@ -256,10 +254,11 @@ unsigned long codebuf_check_gsbutton[] = {
 
 unsigned long codebuf_fifo_receive[] = {
   /* Function: FIFO receive byte */
-  ADDIU(SP, SP, 0xFFE0),
+  ADDIU(SP, SP, 0xFFD8),
   SW(S0, 0x10, SP),
   SW(S1, 0x14, SP),
-  SW(RA, 0x18, SP),
+  SW(S2, 0x18, SP),
+  SW(RA, 0x1C, SP),
   /* disable interrupts */
   MFC0(S1, 12),
   ADDIU(V0, R0, 0xfffe),
@@ -268,18 +267,16 @@ unsigned long codebuf_fifo_receive[] = {
 
   SIMULATE_PROMPT,
 
-  /* wait for high nibble */
+  /* wait for consistent high nibble */
+  ORI(S2, R0, DEBOUNCE_COUNT),
   JAL(0x80787C88),
   NOP,
   ANDI(V0, V0, 0x10),
   BEQ(V0, R0, -4*4),
   NOP,
+  BNE(S2, R0, -6*4),
+  ADDIU(S2, S2, -1),
 
-  /* wait again (debounce) */
-  JAL(0x80787C88),
-  NOP,
-  ANDI(A0, V0, 0x10),
-  BEQ(A0, R0, -4*4),
   /* collect the nibble */
   ANDI(S0, V0, 0xF),
   SLL(S0, S0, 4),
@@ -288,18 +285,16 @@ unsigned long codebuf_fifo_receive[] = {
 
   SIMULATE_PROMPT,
 
-   /* wait for low nibble */
+  /* wait for consistent low nibble */
+  ORI(S2, R0, DEBOUNCE_COUNT),
   JAL(0x80787C88),
   NOP,
   ANDI(V0, V0, 0x10),
   BNE(V0, R0, -4*4),
   NOP,
+  BNE(S2, R0, -6*4),
+  ADDIU(S2, S2, -1),
 
-  /* wait again (debounce) */
-  JAL(0x80787C88),
-  NOP,
-  ANDI(A0, V0, 0x10),
-  BNE(A0, R0, -4*4),
   /* collect the nibble */
   ANDI(V0, V0, 0xF),
   OR(S0, V0, S0),
@@ -311,8 +306,9 @@ unsigned long codebuf_fifo_receive[] = {
   /* restore saved regs */
   LW(S0, 0x10, SP),
   LW(S1, 0x14, SP),
-  LW(RA, 0x18, SP),
-  ADDIU(SP, SP, +0x20),
+  LW(S2, 0x18, SP),
+  LW(RA, 0x1C, SP),
+  ADDIU(SP, SP, +0x28),
   JR(RA),
   NOP,
 };
@@ -360,7 +356,6 @@ int main(int argc, char ** argv)
     do_clear(dev);
     return 1;
   }
-  //Handshake(dev, 1);
 
   FILE* infile=fopen(argv[1], "rb");
   if(!infile)
