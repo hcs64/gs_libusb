@@ -1,0 +1,70 @@
+This is a port of ppcasm's GSUploader to libusb.
+
+
+Original readme follows.
+----
+
+
+GSUploader - ppcasm
+Compiled with Dev-Cpp 4.9.9.2)
+
+I would like to give a big thank you to HCS, for whose work with his neon64 gameshark loader edition this would not have been possible.
+
+Linux is now supported thanks to great work and submitted patches by Mike Ryan. Instructions for building on Linux and Windows are as follows.
+
+Linux:
+
+Windows:
+
+At this point there has also been some success in getting libdragon (http://www.dragonminded.com/n64dev/libdragon)  working with this development environment. Hopefully a tutorial on setting up the environment to be used with this development process will be done shortly. 
+
+
+
+
+How to run your homebrew:
+
+Things you will need:
+Nintendo64 (yeehaw right?)
+Nintendo64 GameShark Version 3.3 (the one with the parallel port on the back)
+Nintendo64 4MB ram expansion pack (This is where the code resides to handle some of the GameShark utilities while the game is running)
+Parallel port cable to connect N64 <-> PC
+A PC with a parallel port (this can be a PCI card and such if you correctly configure the base address)
+
+How to use:
+Note: This works most of the time, but surely I've not tested everything to be able to 100% say it will work _ALL_ the time.
+
+1. Start N64 game (as far as I have seen it does not matter which one, but again, I cannot/have not tested them all.)
+
+2. On the GameShark menu select: Start Game -> Code Generator: ON -> Start Game With No Codes.
+
+3. When the game starts, run the gsuploader program with the N64 binary filename as argument, example: gsuploader.exe funprogram.bin
+
+At this point you should get confirmation on the status of the binary upload. If all went well then you should see your running program.
+
+
+
+How it works (hopefully):
+
+N64 GameShark works by relocating the general interrupt handler to 0xA0000120 and hooking GameShark utilities into the "regular" general interrupt handler at 0xA0000180 during which point in the execution path, a "code generator" gets executed. The code generator is basically an engine made up of instructions which act on behalf of GameShark codes, usually to make data at an address be written with a chosen value over and over again every time an interrupt occurs. This "engine" starts at 0x807c5c00(cached) and 0xa07c5c00(un-cached). In order for GameShark to continue normal interrupt processing and other things, it is usually a requirement that the last instructions in the code engine are la $k0, 0x80000120 and jr $k0, which then do a games normal interrupt processing and other things. 
+
+This uploader works by:
+
+1. Uploading your code.
+
+2. Uploading embedded code. 
+
+3. Uploading a jump instruction to embedded code into the first part of the code engine.
+
+at this point the embedded code stub takes over and:
+
+4. Disables Watchhi and Watchlo so that any accesses on 0xA0000180 and such do not get trapped. 
+
+5. Disables interrupts
+
+6. Modifies EPC in such a way that when a return from interrupt instruction is encountered, it returns to your uploaded binary (remember, still at this point we are running in code engine context, which is running during interrupt processing.)
+
+7. Patches over the jump to embedded code at the start of the code engine back to the original instruction that was at the start of the code engine (if you selected "start games with no codes" as you should have, it should be lui $k0, 0x8000 which is the first part of la $k0, 0x80000120. The reason for this is so that the jump does not stay in ram and continue to be taken during every interrupt, we only need it once so we can gain control of main thread processing.)
+
+8. Executes a return from interrupt (this would eventually be done anyway through normal interrupt processing, but, whatever.) 
+        
+9. At this point, your code should be running. :-)    
