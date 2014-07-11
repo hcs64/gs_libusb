@@ -86,6 +86,7 @@ unsigned long codebuf_pre[]=
   NOP,
 };
 
+#if 1
 unsigned long codebuf_start_gscomms[] = {
   /* Callback function: Start GScomms */
   MFC0(MIPS_T0, 12),
@@ -167,6 +168,7 @@ unsigned long codebuf_check_gsbutton[] = {
   JR(MIPS_RA),
   NOP,
 };
+#endif
 
 #define DEBOUNCE_COUNT 1
 
@@ -385,7 +387,7 @@ int upload_embedded(gscomms * g)
     ecp->ram_address = embed_addr;
 
     /* byteswap */
-    for(j=0;j<=ecp->size/sizeof(ecp->codebuf[0]);j++)
+    for(j=0;j<ecp->size/sizeof(ecp->codebuf[0]);j++)
     {
       ecp->codebuf[j] = htonl(ecp->codebuf[j]);
     }
