@@ -351,23 +351,23 @@ int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
   int got_it = 0;
 
   for (int i = 0; i < retries; i++) {
-    static const struct timespec tenms = {
+    static const struct timespec hundredms = {
       .tv_sec = 0,
-      .tv_nsec = 10*1000*1000
+      .tv_nsec = 100*1000*1000
     };
 
     do_write(dev, 3, 1);
 
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
     unsigned char result = do_read(dev)&0xf;
     do_clear(dev);
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
 
     do_write(dev, 3, 1);
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
     result = (result << 4) | (do_read(dev)&0xf);
     do_clear(dev);
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
 
 
     if (result == 'g') {
@@ -380,9 +380,9 @@ int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
     }
     // try to get back in sync
     do_write(dev, 3, 1);
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
     do_clear(dev);
-    nanosleep(&tenms, NULL);
+    nanosleep(&hundredms, NULL);
   }
 
   if (!got_it) {
@@ -539,8 +539,8 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
     unsigned char buf[32];
 
     int todo = 32;
-    if (todo > length) {
-      todo = length;
+    if (todo > length-i) {
+      todo = length-i;
     }
  
     int count = fread(buf, 1, todo, infile);

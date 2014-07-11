@@ -13,9 +13,11 @@ int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned lon
 int run(libusb_device_handle * dev, unsigned long addr);
 void patch_FIFO_receive(libusb_device_handle * dev);
 
-#define UPLOAD_ADDR 0x80000400UL //Where to upload your code, and also where execution starts after embedded code runs.
+#define UPLOAD_ADDR 0xA0000400UL 
+#define ENTRYPOINT  0x80000400UL
 #define EMBED_ADDR  0xA0300000UL
 
+//#define INSN_PATCH_ADDR 0xA07C5C00UL //GS Code Handler(uncached)
 #define INSN_PATCH_ADDR 0xA07C5C00UL //GS Code Handler(uncached)
 #define GLOBAL_OFFSET_TABLE 0xA0000200UL //Where to store exported function GOT.
 
@@ -41,8 +43,8 @@ unsigned long codebuf_pre[]=
   MTC0(MIPS_T0, 12),
 
   /* Modify EPC */
-  LUI(MIPS_K0, UPLOAD_ADDR>>16), 
-  ORI(MIPS_K0, MIPS_K0, UPLOAD_ADDR), 
+  LUI(MIPS_K0, ENTRYPOINT>>16), 
+  ORI(MIPS_K0, MIPS_K0, ENTRYPOINT), 
   NOP,
   MTC0(MIPS_K0, 14),
   NOP,
@@ -409,14 +411,15 @@ int main(int argc, char ** argv)
 #if 1
   /*Upload binary to specified address.*/
 
-  BulkWriteRAMfromFile(dev, infile, UPLOAD_ADDR, 4096);
-  //BulkWriteRAMfromFile(dev, infile, UPLOAD_ADDR, -1);
+  BulkWriteRAMfromFile(dev, infile, UPLOAD_ADDR, -1);
   fclose(infile);
 #endif
 
+#if 0
   Disconnect(dev);
-  sleep(2);
+  sleep(1);
   InitGSCommsNoisy(dev, RETRIES, 1);
+#endif
 
   run(dev, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
   Disconnect(dev);
@@ -424,7 +427,6 @@ int main(int argc, char ** argv)
   do_clear(dev);
 
   printf("Done.\n");
-  sleep(1);
 
   cleanup_libusb(ctx, dev);
 

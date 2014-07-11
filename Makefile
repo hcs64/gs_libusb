@@ -1,8 +1,8 @@
 CFLAGS=-std=gnu99 -Wall -pedantic -I gscomms/
 LDFLAGS=-lusb-1.0
 CC=gcc
-COMMON_DEPS=gscomms/gscomms.h
 COMMON_SRC=gscomms/gscomms.c
+COMMON_DEPS=gscomms/gscomms.h $(COMMON_SRC)
 
 all: gsuploader/gsuploader neon64/gsupload
 
