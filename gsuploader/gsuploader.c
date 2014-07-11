@@ -10,7 +10,7 @@
 
 int upload_embedded(libusb_device_handle *dev);
 int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
-int UploadBulk(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
+int UploadFast(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
 int run(libusb_device_handle * dev, unsigned long addr);
 void patch_FIFO_receive(libusb_device_handle * dev);
 void unpatch_FIFO_receive(libusb_device_handle * dev);
@@ -377,7 +377,7 @@ int main(int argc, char ** argv)
 #if 1
   /*Upload binary to specified address.*/
 
-  BulkWriteRAMfromFile(dev, infile, UPLOAD_ADDR, -1);
+  FastWriteRAMfromFile(dev, infile, UPLOAD_ADDR, -1);
   fclose(infile);
 #endif
 
@@ -427,7 +427,7 @@ void unpatch_FIFO_receive(libusb_device_handle * dev) {
   unsigned char insn[4];
   write32BE(insn, jal);
 
-  if(UploadBulk(dev, insn, 4, 0xA07919B0))
+  if(UploadFast(dev, insn, 4, 0xA07919B0))
   {  
     printf("FIFO unpatch failed...\n");
     do_clear(dev);
@@ -522,7 +522,7 @@ int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned lon
   return 0;
 }
 
-int UploadBulk(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address) {
+int UploadFast(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address) {
   unsigned long c=0;
 
   Handshake(dev, 1);
@@ -553,7 +553,7 @@ int run(libusb_device_handle * dev, unsigned long addr) {
   write32BE(insn, instruction);
 
   /*Inject synthetic jump instruction into code handler to ensure it runs.*/
-  if(UploadBulk(dev, insn, 4, INSN_PATCH_ADDR))
+  if(UploadFast(dev, insn, 4, INSN_PATCH_ADDR))
   {  
     printf("Instruction patch failed...\n");
     do_clear(dev);

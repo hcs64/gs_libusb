@@ -39,7 +39,7 @@ void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * i
 void HandleEvents(libusb_context * ctx, libusb_device_handle * dev, long timeout_ms);
 
 // experimental, requires the loader to be patched
-void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length);
+void FastWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length);
 
 // overall setup of device
 void setup_libusb(libusb_context ** ctx, libusb_device_handle ** dev);

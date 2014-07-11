@@ -194,85 +194,9 @@ void do_clear_async(libusb_device_handle * dev) {
   do_write_async(dev, 0, 0);
 }
 
-// trying to coerce the device into doing a bulk mode transfer
-void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
-
-  const int max_len = 16;
-  uint8_t buf[max_len];
-  const int bytes_per_buf = max_len/2;
-
-  while (length > 0) {
-    int todo = bytes_per_buf;
-    if (todo > length) {
-      todo = length;
-    }
-
-    for (int i = 0, j = 0; i < todo; i++, j+=2) {
-      buf[j+0] = 0x10 | (data[i] >> 4);
-      buf[j+1] = 0 | (data[i] & 0xf);
-    }
-
-    int transferred;
-
-    //printf("transfer call start\n");
-    int rc = libusb_bulk_transfer(
-        dev,
-        ENDPOINT_MOS_BULK_WRITE,
-        buf,
-        todo * 2,
-        &transferred,
-        10*1000);
-    //printf("transfer call finished\n");
-
-    if (rc != 0) {
-      fprintf(stderr, "bulk write failed: %s\n", libusb_error_name(rc));
-      do_clear(dev);
-      set_mode(dev, MOS_SPP_MODE);
-      exit(-1);
-    }
-    if (transferred != todo * 2) {
-      fprintf(stderr, "short bulk write %d != %d\n", todo*2, transferred);
-      do_clear(dev);
-      set_mode(dev, MOS_SPP_MODE);
-      exit(-1);
-    }
-
-    length -= transferred/2;
-    data += transferred/2;
-  }
-}
-
-void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
-#if 0
-  const int max_len = 16;
-  uint8_t buf[max_len];
-  const int bytes_per_buf = 16/2;
-#endif
-
-  while (length > 0) {
-#if 0
-    ReadWriteNibble(dev, *data>>4);
-    ReadWriteNibble(dev, *data);
-
-    length--;
-    data++;
-#else
-    int todo = 1; //bytes_per_buf;
-    if (todo > length) {
-      todo = length;
-    }
-
-    for (int i = 0; i < todo; i++) {
-      do_write(dev, data[i] >> 4, 1);
-      //printf("%02x", do_raw_read(dev));
-      do_write(dev, data[i], 0);
-      //printf("%02x", do_raw_read(dev));
-    }
-
-    length -= todo;
-    data += todo;
-#endif
-  }
+void do_fast_write(libusb_device_handle *dev, uint8_t data) {
+  do_write(dev, data >> 4, 1);
+  do_write(dev, data, 0);
 }
 
 unsigned char ReadWriteNibble(libusb_device_handle * dev, unsigned char x) {
@@ -502,7 +426,7 @@ void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * i
   WriteRAMFinish(ctx, dev);
 }
 
-void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
+void FastWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
   if (length == (unsigned long)-1) {
     fseek(infile, 0, SEEK_END);
     length = ftell(infile);
@@ -530,19 +454,14 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
   set_mode(dev, MOS_FIFO_MODE);
 #endif
 
-  printf("Bulk Uploading %lu bytes to %x\n", length, (int)address);
+  printf("Fast Uploading %lu bytes to %x\n", length, (int)address);
 
-  for (unsigned long i = 0; i < length; ) {
-    unsigned char buf[32];
+  for (unsigned long i = 0; i < length; i++) {
+    int c;
 
-    int todo = 32;
-    if (todo > length-i) {
-      todo = length-i;
-    }
- 
-    int count = fread(buf, 1, todo, infile);
+    c = fgetc(infile);
 
-    if (count != todo) {
+    if (c == EOF) {
       fprintf(stderr, "hit EOF before writing all bytes\n");
       exit(-1);
     }
@@ -551,24 +470,12 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
       printf("%lu %2lu%%\n", i, i*100/length);
     }
 
-    do_sim_bulk_write(dev, buf, todo);
-
-    i += todo;
+    do_fast_write(dev, (unsigned char)c);
   }
 
   printf("%lu %2lu%%\n", length, 100ul);
 
-#if 0
-  //set_mode(dev, MOS_SPP_MODE);
-
-  // need to manually send the bytes here as the first one will have a
-  // bad flag leftover from FIFO mode, WriteByte ignores these
-  for (int i = 0; i < 9; i++) {
-    WriteByte(dev, 0);
-  }
-#else
   EndTransaction(dev, 0);
-#endif
 }
 
 static void WriteRAMStart(libusb_context * ctx, libusb_device_handle * dev, unsigned long address, unsigned long length) {
