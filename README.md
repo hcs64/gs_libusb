@@ -8,5 +8,6 @@ found in many low-cost adapters.
 
 Subdirectories:
 - comms: the main low-level interface
-- gsuploader: homebrew loader based on ppcasm's "gsuploader"
-- neon64: the "gsupload" NES emulator loader
+- gsuploader: homebrew loader based on ppcasm's "gsuploader" (including a sample binary "flames.bin")
+- neon64: the "gsupload" NES emulator loader (including the Neon64 binary and a sample NES ROM "efp.nes")
+
