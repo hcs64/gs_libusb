@@ -18,9 +18,9 @@ int run(gscomms * g, unsigned long addr);
 void patch_fast_receive(gscomms * g);
 void unpatch_fast_receive(gscomms * g);
 
-#define UPLOAD_ADDR 0xA0000400UL 
-#define ENTRYPOINT  0x80000400UL
-#define EMBED_ADDR  0xA0300000UL
+#define UPLOAD_ADDR 0xA0300000UL 
+#define ENTRYPOINT  0x80300000UL
+#define EMBED_ADDR  0xA0300000UL-1024
 
 #define INSN_PATCH_ADDR 0xA07C5C00UL //GS Code Handler(uncached)
 
@@ -250,7 +250,7 @@ int main(int argc, char ** argv)
   printf("\nN64 HomeBrew Loader - ppcasm (Based on HCS GSUpload)\n");
   printf("MCS7705 USB version via libusb\n\n");
 
-  if(argc!=2)
+  if(argc!=3)
   {
     printf("Wrong Usage:\n(Homebrew Uploader): %s <binary>\n", argv[0]);
     return 1;
@@ -315,6 +315,23 @@ int main(int argc, char ** argv)
   do_clear(g);
 
   printf("Done.\n");
+
+
+  infile=fopen(argv[2], "rb");
+  if(!infile)
+  {
+    printf("error opening %s\n", argv[2]);
+    do_clear(g);
+    return 1;
+  }
+
+  printf("Press a key to load rom");
+  getchar();
+
+  InitGSComms(g, RETRIES);
+  WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
+  fclose(infile);
+  Disconnect(g);
 
   cleanup_gscomms(g);
   g = NULL;
