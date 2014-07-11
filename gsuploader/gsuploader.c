@@ -12,8 +12,8 @@ int upload_embedded(libusb_device_handle *dev);
 int Upload(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
 int UploadFast(libusb_device_handle *dev, const unsigned char * buffer, unsigned long size, unsigned long address);
 int run(libusb_device_handle * dev, unsigned long addr);
-void patch_FIFO_receive(libusb_device_handle * dev);
-void unpatch_FIFO_receive(libusb_device_handle * dev);
+void patch_fast_receive(libusb_device_handle * dev);
+void unpatch_fast_receive(libusb_device_handle * dev);
 
 #define UPLOAD_ADDR 0xA0000400UL 
 #define ENTRYPOINT  0x80000400UL
@@ -26,6 +26,7 @@ void unpatch_FIFO_receive(libusb_device_handle * dev);
 #define GOT_ENTRY_SIZE 16
 
 #define DETACH_GS_GOT_IDX     0
+#define FAST_RECEIVE_GOT_IDX  1
 
 /* Embedded pre-setup code */
 unsigned long codebuf_pre[]=
@@ -164,61 +165,10 @@ unsigned long codebuf_check_gsbutton[] = {
   NOP,
 };
 
-#if 0
-  /* Function: Patch in FIFO receive */
-  GAMESHARK_PATCH_FIFO_RECEIVE,
-  /* generate JAL instruction */
-  LUI(A1, GLOBAL_OFFSET_TABLE>>16),
-  ORI(A1, GLOBAL_OFFSET_TABLE&0xffff),
-  LW(A1, 4*4, A1),
-  LUI(A0, 0x1000),
-  ADDIU(A0, A0, -1),
-  MIPS_AND(A1, A1, A0),
-  SRL(A1, A1, 2),
-  LUI(A0, 0x03 << (26-16)),
-  OR(A0, A0, A1),
-
-  LUI(A1, 0x8079),
-  SW(A0, 0x19B0, A1),
-  CACHE(A1, CACH_PI|CACHE_IINV, 0x19B0),
-
-  /* Function: Patch out FIFO receive */
-  GAMESHARK_UNPATCH_FIFO_RECEIVE,
-  LUI(A0, (0x80787D5C>>(2+16))&0x3fff),
-  ORI(A0,  0x80787D5C>>2),
-  LUI(A1. 0x8079),
-  SW(A0, 0x19B0, A1),
-  CACHE(A1, CACH_PI|CACHE_IINV, 0x19B0),
-#endif
-
 #define DEBOUNCE_COUNT 1
-#define ACK_PULSE 50
-//              /ERROR  /BUSY   /ACK
-// 0x18 = 0x08    1       0       0
-// 0x10 = 0x88    1       1       0
-// 0x1C = 0x48    1       0       1
-// 0x14 = 0xC8    1       1       1
 
-#define PHASE1 0x14
-
-#define SIMULATE_PROMPT             \
-  JAL(0x80787C24),                  \
-  ORI(A0, R0, PHASE1)
-
-#define PHASE2 0x10
-#define PHASE3 0x00
-
-#define SIMULATE_ACK                \
-  JAL(0x80787C24),                  \
-  ORI(A0, R0, PHASE2),              \
-  ORI(A0, A0, ACK_PULSE),           \
-  BNE(A0, R0, -1*4),                \
-  ADDIU(A0, A0, -1),                \
-  JAL(0x80787C24),                  \
-  ORI(A0, R0, PHASE3)
-
-unsigned long codebuf_fifo_receive[] = {
-  /* Function: FIFO receive byte */
+unsigned long codebuf_fast_receive[] = {
+  /* Function: fast receive byte */
   ADDIU(SP, SP, 0xFFD8),
   SW(S0, 0x10, SP),
   SW(S1, 0x14, SP),
@@ -285,8 +235,9 @@ typedef struct {
 
 embedded_code embedded_codes[] = {
   EMBEDDED_ENTRY(codebuf_pre),            // 0
-  EMBEDDED_ENTRY(codebuf_start_gscomms),  // 1
-  EMBEDDED_ENTRY(codebuf_check_gsbutton), // 2
+  EMBEDDED_ENTRY(codebuf_fast_receive),   // 1
+  //EMBEDDED_ENTRY(codebuf_start_gscomms),  // 2
+  //EMBEDDED_ENTRY(codebuf_check_gsbutton), // 3
 };
 
 int main(int argc, char ** argv)
@@ -324,8 +275,7 @@ int main(int argc, char ** argv)
 
 #if 1
   printf("Patching in modified loader...\n");
-  //run(dev, embedded_codes[FIFO_PATCH_GOT_IDX].ram_address);
-  patch_FIFO_receive(dev);
+  patch_fast_receive(dev);
 
 #if 1
   Disconnect(dev);
@@ -349,7 +299,7 @@ int main(int argc, char ** argv)
 #if 0
   printf("Patching out modified loader...\n");
   //InitGSCommsNoisy(dev, RETRIES, 1);
-  unpatch_FIFO_receive(dev);
+  unpatch_fast_receive(dev);
 #if 1
   Disconnect(dev);
   sleep(1);
@@ -357,7 +307,6 @@ int main(int argc, char ** argv)
 #endif
   printf("Done.\n");
 #endif
->>>>>>> twophase
 
   run(dev, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
   Disconnect(dev);
@@ -371,8 +320,8 @@ int main(int argc, char ** argv)
   return 0;
 }
 
-void patch_FIFO_receive(libusb_device_handle * dev) {
-  unsigned long addr = embedded_codes[FIFO_RECEIVE_GOT_IDX].ram_address;
+void patch_fast_receive(libusb_device_handle * dev) {
+  unsigned long addr = embedded_codes[FAST_RECEIVE_GOT_IDX].ram_address;
 
   unsigned long jal = JAL(addr);
   unsigned char insn[4];
@@ -380,20 +329,20 @@ void patch_FIFO_receive(libusb_device_handle * dev) {
 
   if(Upload(dev, insn, 4, 0xA07919B0))
   {  
-    printf("FIFO patch failed...\n");
+    printf("Fast patch failed...\n");
     do_clear(dev);
     exit(-1);
   }
 }
 
-void unpatch_FIFO_receive(libusb_device_handle * dev) {
+void unpatch_fast_receive(libusb_device_handle * dev) {
   unsigned long jal = 0x0c1e1f57;
   unsigned char insn[4];
   write32BE(insn, jal);
 
   if(UploadFast(dev, insn, 4, 0xA07919B0))
   {  
-    printf("FIFO unpatch failed...\n");
+    printf("Fast unpatch failed...\n");
     do_clear(dev);
     exit(-1);
   }
