@@ -148,6 +148,7 @@ void do_clear(gscomms * g) {
 void do_write(gscomms * g, uint8_t data,int flagged) {
 
   uint8_t flagged_data = (flagged ? 0x10 : 0) | (data & 0xf);
+  //printf("%02x\n", flagged_data);
 
   int rc = libusb_control_transfer(
       g->dev,
@@ -180,6 +181,7 @@ void do_write_async_cb(struct libusb_transfer * transfer) {
 
 void do_write_async(gscomms * g, uint8_t data, int flagged) {
   uint8_t flagged_data = (flagged ? 0x10 : 0) | (data & 0xf);
+  //printf("%02x\n", flagged_data);
 
   struct libusb_transfer * transfer = libusb_alloc_transfer(0);
 
@@ -219,11 +221,13 @@ void do_clear_async(gscomms * g) {
 }
 
 void do_fast_write(gscomms * g, uint8_t data) {
+  //printf("%02x\n", data);
   do_write(g, data >> 4, 1);
   do_write(g, data, 0);
 }
 
 void do_fast_write_async(gscomms * g, uint8_t data) {
+  //printf("%02x\n", data);
   do_write_async(g, data >> 4, 1);
   do_write_async(g, data, 0);
 }
