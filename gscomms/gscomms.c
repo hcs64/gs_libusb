@@ -89,7 +89,7 @@ void get_clock(libusb_device_handle * dev) {
 }
 #endif
 
-uint8_t do_read(libusb_device_handle * dev) {
+uint8_t do_raw_read(libusb_device_handle * dev) {
   unsigned char data;
 
   int rc = libusb_control_transfer(
@@ -106,6 +106,14 @@ uint8_t do_read(libusb_device_handle * dev) {
     fprintf(stderr, "read failed: %s\n", libusb_error_name(rc));
     exit(-1);
   }
+
+  return data;
+}
+
+uint8_t do_read(libusb_device_handle * dev) {
+  unsigned char data;
+
+  data = do_raw_read(dev);
 
   if (data & 0x08) {
     return ((data^0x80)>>4)|0x10;
@@ -186,114 +194,9 @@ void do_clear_async(libusb_device_handle * dev) {
   do_write_async(dev, 0, 0);
 }
 
-// trying to coerce the device into doing a bulk mode transfer
-void do_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
-
-  // set into the correct mode
-  set_mode(dev, MOS_FIFO_MODE);
-
-  const int max_len = 16;
-  uint8_t buf[max_len];
-  const int bytes_per_buf = 16/2;
-
-  while (length > 0) {
-    int todo = bytes_per_buf;
-    if (todo > length) {
-      todo = length;
-    }
-
-    for (int i = 0, j = 0; i < todo; i++, j+=2) {
-      buf[j+0] = 0x10 | (data[i] >> 4);
-      buf[j+1] = 0 | (data[i] & 0xf);
-    }
-
-    int transferred;
-
-    printf("transfer call start\n");
-    int rc = libusb_bulk_transfer(
-        dev,
-        ENDPOINT_MOS_BULK_WRITE,
-        buf,
-        todo * 2,
-        &transferred,
-        10*1000);
-    printf("transfer call finished\n");
-
-    if (rc != 0) {
-      fprintf(stderr, "bulk write failed: %s\n", libusb_error_name(rc));
-      exit(-1);
-    }
-    if (transferred != todo * 2) {
-      fprintf(stderr, "short bulk write %d != %d\n", todo*2, transferred);
-      exit(-1);
-    }
-
-    length -= transferred/2;
-    data += transferred/2;
-  }
-
-  set_mode(dev, MOS_SPP_MODE);
-
-}
-
-void do_sim_bulk_write(libusb_device_handle *dev, const uint8_t * data, int length) {
-#if 0
-  const int max_len = 16;
-  uint8_t buf[max_len];
-  const int bytes_per_buf = 16/2;
-#endif
-
-  while (length > 0) {
-#if 1
-    ReadWriteNibble(dev, *data>>4);
-    ReadWriteNibble(dev, *data);
-
-    length--;
-    data++;
-#else
-    int rc;
-    int todo = 1; //bytes_per_buf;
-    if (todo > length) {
-      todo = length;
-    }
-
-    for (int i = 0; i < todo; i++) {
-
-      rc = libusb_control_transfer(
-        dev,
-        REQTYPE_WRITE,
-        REQ_MOS_WRITE,
-        MOS_PORT_BASE | 0x10 | (data[i] >> 4),
-        MOS_PP_DATA_REG,
-        NULL,
-        0,
-        TIMEOUT);
-
-      if (rc != 0) {
-        fprintf(stderr, "write failed: %s\n", libusb_error_name(rc));
-        exit(-1);
-      }
-
-      rc = libusb_control_transfer(
-        dev,
-        REQTYPE_WRITE,
-        REQ_MOS_WRITE,
-        MOS_PORT_BASE | (data[i] & 0xf),
-        MOS_PP_DATA_REG,
-        NULL,
-        0,
-        TIMEOUT);
-
-      if (rc != 0) {
-        fprintf(stderr, "write failed: %s\n", libusb_error_name(rc));
-        exit(-1);
-      }
-    }
-
-    length -= todo;
-    data += todo;
-#endif
-  }
+void do_fast_write(libusb_device_handle *dev, uint8_t data) {
+  do_write(dev, data >> 4, 1);
+  do_write(dev, data, 0);
 }
 
 unsigned char ReadWriteNibble(libusb_device_handle * dev, unsigned char x) {
@@ -342,6 +245,13 @@ unsigned long ReadWrite32(libusb_device_handle * dev, unsigned long v) {
     (((unsigned long)ReadWriteByte(dev, v>>16))<<16) |
     (((unsigned long)ReadWriteByte(dev, v>> 8))<< 8) |
     ReadWriteByte(dev, v);
+}
+
+void Write32(libusb_device_handle * dev, unsigned long v) {
+  WriteByte(dev, v>>24);
+  WriteByte(dev, v>>16);
+  WriteByte(dev, v>> 8);
+  WriteByte(dev, v);
 }
 
 int InitGSCommsNoisy(libusb_device_handle * dev, int retries, int noisy) {
@@ -406,6 +316,11 @@ int Handshake(libusb_device_handle * dev, int quiet) {
 
   if (!quiet) printf("OK\n");
   return 1;
+}
+
+void WriteHandshake(libusb_device_handle * dev) {
+  WriteByte(dev, 'G');
+  WriteByte(dev, 'T');
 }
 
 int InitGSComms(libusb_device_handle * dev, int retries) {
@@ -511,7 +426,7 @@ void WriteRAMfromFile(libusb_context * ctx, libusb_device_handle * dev, FILE * i
   WriteRAMFinish(ctx, dev);
 }
 
-void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
+void FastWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned long address, unsigned long length) {
   if (length == (unsigned long)-1) {
     fseek(infile, 0, SEEK_END);
     length = ftell(infile);
@@ -531,21 +446,22 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
 
   ReadWriteByte(dev, 2);
   ReadWrite32(dev, address);
-  ReadWrite32(dev, length);
+  Write32(dev, length);
  
-  printf("Bulk Uploading %lu bytes to %x\n", length, (int)address);
+#if 0
+  do_clear(dev);
 
-  for (unsigned long i = 0; i < length; ) {
-    unsigned char buf[32];
+  set_mode(dev, MOS_FIFO_MODE);
+#endif
 
-    int todo = 32;
-    if (todo > length-i) {
-      todo = length-i;
-    }
- 
-    int count = fread(buf, 1, todo, infile);
+  printf("Fast Uploading %lu bytes to %x\n", length, (int)address);
 
-    if (count != todo) {
+  for (unsigned long i = 0; i < length; i++) {
+    int c;
+
+    c = fgetc(infile);
+
+    if (c == EOF) {
       fprintf(stderr, "hit EOF before writing all bytes\n");
       exit(-1);
     }
@@ -554,9 +470,7 @@ void BulkWriteRAMfromFile(libusb_device_handle * dev, FILE * infile, unsigned lo
       printf("%lu %2lu%%\n", i, i*100/length);
     }
 
-    do_sim_bulk_write(dev, buf, todo);
-
-    i += todo;
+    do_fast_write(dev, (unsigned char)c);
   }
 
   printf("%lu %2lu%%\n", length, 100ul);
