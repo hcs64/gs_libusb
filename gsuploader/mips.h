@@ -589,6 +589,7 @@ enum
 #define ADD     MIPS_ADD
 #define ADDI    MIPS_ADDI
 #define ADDIU   MIPS_ADDIU
+#define AND     MIPS_AND
 #define ANDI    MIPS_ANDI
 #define BC1F    MIPS_BC1F
 #define BC1FL   MIPS_BC1FL
@@ -718,6 +719,11 @@ enum
 #define ERET    (OP(0x10) | 1 << 25 | 0x18)
 #define SYNC    (0x0F)
 
+/* Load Adress: a common two-dword macro */
+#define LA(r,addr) \
+                MIPS_LUI((r), (addr)>>16), \
+                MIPS_ORI((r), (r), (addr))
+ 
 static void write32BE(unsigned char *buf, unsigned long v) {
   buf[0] = v>>24;
   buf[1] = v>>16;
@@ -725,3 +731,16 @@ static void write32BE(unsigned char *buf, unsigned long v) {
   buf[3] = v;
 }
 
+#if 0
+static void write2x32BE(unsigned char *buf, unsigned long v1, unsigned long v2) {
+  buf[0] = v1>>24;
+  buf[1] = v1>>16;
+  buf[2] = v1>>8;
+  buf[3] = v1;
+
+  buf[4] = v2>>24;
+  buf[5] = v2>>16;
+  buf[6] = v2>>8;
+  buf[7] = v2;
+}
+#endif

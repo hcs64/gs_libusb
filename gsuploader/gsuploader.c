@@ -13,15 +13,15 @@ int Upload(gscomms * g, const unsigned char * buffer, unsigned long size, unsign
 int UploadFast(gscomms * g, const unsigned char * buffer, unsigned long size, unsigned long address);
 int run(gscomms * g, unsigned long addr);
 void patch_fast_receive(gscomms * g);
-void unpatch_fast_receive(gscomms * g);
 
 #define UPLOAD_ADDR 0x80300000UL
 #define ENTRYPOINT  0x80300000UL
 #define EMBED_ADDR  0xA0300000UL-1024
 
-#define INSN_PATCH_ADDR 0xA07C5C00UL //GS Code Handler(uncached)
-
 #define GLOBAL_OFFSET_TABLE 0xA0000200UL //Where to store exported function GOT.
+
+#define INSN_PATCH_ADDR 0xA07C5C00UL //GS Code Handler(uncached)
+#define GET_BYTE_PATCH_ADDR 0xA07919B0
 
 #define GOT_ENTRY_SIZE 16
 
@@ -32,50 +32,45 @@ void unpatch_fast_receive(gscomms * g);
 unsigned long codebuf_pre[]=
 {
   /* Stop GameShark traps */
-  MTC0(MIPS_R0, 18),
+  MTC0(R0, 18),
   NOP,
-  MTC0(MIPS_R0, 19),
+  MTC0(R0, 19),
   NOP,
 
   /* Disable Interrupts */
-  MFC0(MIPS_T0, 12),
-  MIPS_ADDIU(MIPS_T1, MIPS_R0, 0xfffe),
-  MIPS_AND(MIPS_T0, MIPS_T0, MIPS_T1),
-  MTC0(MIPS_T0, 12),
+  MFC0(T0, 12),
+  ADDIU(T1, R0, 0xfffe),
+  AND(T0, T0, T1),
+  MTC0(T0, 12),
 
   /* Modify EPC */
-  LUI(MIPS_K0, ENTRYPOINT>>16), 
-  ORI(MIPS_K0, MIPS_K0, ENTRYPOINT), 
+  LA(K0, ENTRYPOINT),
   NOP,
-  MTC0(MIPS_K0, 14),
+  MTC0(K0, 14),
   NOP,
 
   /* Patch back modified code handler */
-  LUI(MIPS_K1, 0x3c1a),
-  ORI(MIPS_K1, MIPS_K1, 0x8000),
+  LA(K1, 0x3c1a8000UL),
   NOP,
-  LUI(MIPS_K0, INSN_PATCH_ADDR>>16),
-  ORI(MIPS_K0, MIPS_K0, INSN_PATCH_ADDR),
+  LA(K0, INSN_PATCH_ADDR),
   NOP,
-  SW(MIPS_K1, 0, MIPS_K0),
+  SW(K1, 0, K0),
   NOP,
   SYNC,
   NOP,
 
   /* Halt RSP */
-  LUI(MIPS_T1, 2),
-  LUI(MIPS_T0, 0xa404),
-  ORI(MIPS_T0, MIPS_T0, 0x0010),
+  LUI(T1, 2),
+  LA(T0, 0xa4040010UL),
   NOP,
-  SW(MIPS_T1, 0, MIPS_T0),
+  SW(T1, 0, T0),
   NOP,
 
   /* Halt RDP */
-  LUI(MIPS_T1, 1|4|0x10|0x40|0x80|0x100|0x200),
-  LUI(MIPS_T0, 0xa410),
-  ORI(MIPS_T0, MIPS_T0, 0x000c),
+  LUI(T1, 1|4|0x10|0x40|0x80|0x100|0x200),
+  LA(T0, 0xa410000cUL),
   NOP,
-  SW(MIPS_T1, 0, MIPS_T0),
+  SW(T1, 0, T0),
   NOP,
 
   /* Return from interrupt - execute code */
@@ -84,6 +79,7 @@ unsigned long codebuf_pre[]=
 };
 
 #define DEBOUNCE_COUNT 1
+#define GS_READ_PORT  0x80787C88
 
 unsigned long codebuf_fast_receive[] = {
   /* Function: fast receive byte */
@@ -95,12 +91,12 @@ unsigned long codebuf_fast_receive[] = {
   /* disable interrupts */
   MFC0(S1, 12),
   ADDIU(V0, R0, 0xfffe),
-  MIPS_AND(V0, S1, V0),
+  AND(V0, S1, V0),
   MTC0(V0, 12),
 
   /* wait for consistent high nibble */
   ORI(S2, R0, DEBOUNCE_COUNT),
-  JAL(0x80787C88),
+  JAL(GS_READ_PORT),
   NOP,
   ANDI(A0, V0, 0x10),
   BEQ(A0, R0, -4*4),
@@ -114,7 +110,7 @@ unsigned long codebuf_fast_receive[] = {
 
   /* wait for consistent low nibble */
   ORI(S2, R0, DEBOUNCE_COUNT),
-  JAL(0x80787C88),
+  JAL(GS_READ_PORT),
   NOP,
   ANDI(A0, V0, 0x10),
   BNE(A0, R0, -4*4),
@@ -154,8 +150,6 @@ typedef struct {
 embedded_code embedded_codes[] = {
   EMBEDDED_ENTRY(codebuf_pre),            // 0
   EMBEDDED_ENTRY(codebuf_fast_receive),   // 1
-  //EMBEDDED_ENTRY(codebuf_start_gscomms),  // 2
-  //EMBEDDED_ENTRY(codebuf_check_gsbutton), // 3
 };
 
 int main(int argc, char ** argv)
@@ -259,7 +253,7 @@ void patch_fast_receive(gscomms * g) {
   unsigned char insn[4];
   write32BE(insn, jal);
 
-  if(Upload(g, insn, 4, 0xA07919B0))
+  if(Upload(g, insn, 4, GET_BYTE_PATCH_ADDR))
   {  
     printf("Fast patch failed...\n");
     do_clear(g);
