@@ -28,6 +28,9 @@ void patch_fast_receive(gscomms * g);
 #define DETACH_GS_GOT_IDX     0
 #define FAST_RECEIVE_GOT_IDX  1
 
+/* flag: use the 2x transfer? */
+#define USE_FAST_RECEIVE 1
+
 /* Embedded pre-setup code */
 unsigned long codebuf_pre[]=
 {
@@ -154,8 +157,11 @@ embedded_code embedded_codes[] = {
 
 int main(int argc, char ** argv)
 {
-  gscomms * g;
-  int two_stage;
+  gscomms * g = NULL;
+  int two_stage = 0;
+
+  FILE * infile1 = NULL;
+  FILE * infile2 = NULL;
 
   printf("\nN64 HomeBrew Loader - hcs, ppcasm\n");
   printf("MCS7705 USB version via libusb\n\n");
@@ -176,6 +182,24 @@ int main(int argc, char ** argv)
     return 1;
   }
 
+  infile1 = fopen(argv[1], "rb");
+  if(!infile1)
+  {
+    printf("error opening %s\n", argv[1]);
+    do_clear(g);
+    return 1;
+  }
+
+  if (two_stage) {
+    infile2 = fopen(argv[2], "rb");
+    if(!infile2)
+    {
+      printf("error opening %s\n", argv[2]);
+      do_clear(g);
+      return 1;
+    }
+  }
+
   g = setup_gscomms();
 
   if (!InitGSCommsNoisy(g, RETRIES, 1)) {
@@ -184,17 +208,9 @@ int main(int argc, char ** argv)
     return 1;
   }
 
-  FILE* infile=fopen(argv[1], "rb");
-  if(!infile)
-  {
-    printf("error opening %s\n", argv[1]);
-    do_clear(g);
-    return 1;
-  }
-
   upload_embedded(g);
 
-#if 1
+#if USE_FAST_RECEIVE
   printf("Patching in modified loader...\n");
   patch_fast_receive(g);
 
@@ -203,16 +219,21 @@ int main(int argc, char ** argv)
 #if 1
   Disconnect(g);
   sleep(1); // might take a little bit for the instruction cache to turn over
-  InitGSComms(g, RETRIES);
-  printf("Done.\n");
+  if (!InitGSComms(g, RETRIES)) {
+    printf("Init failed\n");
+    do_clear(g);
+    return 1;
+  }
 #endif
+
+  printf("Done.\n");
 
 #endif
 
   /*Upload binary to specified address.*/
 
-  WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
-  fclose(infile);
+  WriteRAMfromFile(g, infile1, UPLOAD_ADDR, -1);
+  fclose(infile1);
 
   run(g, embedded_codes[DETACH_GS_GOT_IDX].ram_address);
   Disconnect(g);
@@ -223,20 +244,18 @@ int main(int argc, char ** argv)
 
 
   if (two_stage) {
-    // let the loader get settled
+    /* let the loader get settled */
+    printf("Send second stage in 1 second...\n");
     sleep(1);
 
-    infile=fopen(argv[2], "rb");
-    if(!infile)
-    {
-      printf("error opening %s\n", argv[2]);
+    if (!InitGSComms(g, RETRIES)) {
+      printf("Init failed\n");
       do_clear(g);
       return 1;
     }
 
-    InitGSComms(g, RETRIES);
-    WriteRAMfromFile(g, infile, UPLOAD_ADDR, -1);
-    fclose(infile);
+    WriteRAMfromFile(g, infile2, UPLOAD_ADDR, -1);
+    fclose(infile2);
     Disconnect(g);
   }
 
