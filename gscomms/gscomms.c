@@ -408,18 +408,34 @@ void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned lo
   EndTransaction(g, 0);
 }
 
+static inline void status_report(gscomms * g, time_t * status_report_time, unsigned long i, unsigned long length) {
+  if (!status_report_time || time(NULL) >= *status_report_time) {
+    if (g->async) {
+      printf("%lu %2lu%% %d\n", i, i*100/length, g->writes_pending);
+    } else {
+      printf("%lu %2lu%%\n", i, i*100/length);
+    }
+
+    if (status_report_time) {
+      *status_report_time = time(NULL)+2;
+    }
+  }
+}
+
+
 void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length) {
   WriteRAMStart(g, address, length);
 
   printf("Uploading to %x\n", (int)address);
 
+  time_t status_report_time = 0;
+
   for (unsigned long i = 0; i < length; i++) {
     WriteRAMByte(g, buf[i]);
 
-    if ((i % 1000) == 0) {
-      printf("%lu %2lu%%\n", i, i*100/length);
-      HandleEvents(g, 0);
-    }
+    HandleEvents(g, 0);
+
+    status_report(g, &status_report_time, i, length);
   }
 
   WriteRAMFinish(g);
@@ -441,8 +457,10 @@ void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigne
     return;
   }
 
+
   WriteRAMStart(g, address, length);
 
+  time_t status_report_time = 0;
   printf("Uploading to %x\n", (int)address);
 
   for (unsigned long i = 0; i < length; i++) {
@@ -455,13 +473,14 @@ void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigne
 
     WriteRAMByte(g, (unsigned char)c);
 
-    if ((i % 1000) == 0) {
-      printf("%lu %2lu%%\n", i, i*100/length);
-      HandleEvents(g, 0);
-    }
+    HandleEvents(g, 0);
+
+    status_report(g, &status_report_time, i, length);
   }
 
   WriteRAMFinish(g);
+
+  status_report(g, NULL, length, length);
 }
 
 static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length) {
@@ -483,11 +502,13 @@ static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long leng
 
 void HandleEvents(gscomms * g, long timeout_ms) {
   if (g->async) {
-    struct timeval tv = {
-      .tv_sec = 0,
-      .tv_usec = timeout_ms*1000
-    };
-    libusb_handle_events_timeout(g->ctx, &tv);
+    if (g->writes_pending > 256) {
+      struct timeval tv = {
+        .tv_sec = 0,
+        .tv_usec = timeout_ms*1000
+      };
+      libusb_handle_events_timeout(g->ctx, &tv);
+    }
   }
 }
 
