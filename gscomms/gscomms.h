@@ -53,7 +53,7 @@ void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsi
 void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length);
 
 // do outstanding asynchronous processing for libusb
-void HandleEvents(gscomms * g, long timeout_ms);
+void HandleEvents(gscomms * g, long timeout_ms, int max_pending_writes);
 
 // overall setup of device
 gscomms * setup_gscomms();

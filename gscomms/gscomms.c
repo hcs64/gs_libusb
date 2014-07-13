@@ -41,7 +41,7 @@ static const uint8_t MOS_SPP_MODE    = 0 << 5;
 static const uint8_t MOS_NIBBLE_MODE = 1 << 5; // default on reset
 static const uint8_t MOS_FIFO_MODE   = 2 << 5;
 
-static const int TIMEOUT = 1000; // ms
+static const int TIMEOUT = 10*1000; // ms
 
 static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length);
 static void WriteRAMByte(gscomms * g, unsigned char b);
@@ -433,7 +433,7 @@ void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsi
   for (unsigned long i = 0; i < length; i++) {
     WriteRAMByte(g, buf[i]);
 
-    HandleEvents(g, 0);
+    HandleEvents(g, 0, 256);
 
     status_report(g, &status_report_time, i, length);
   }
@@ -473,7 +473,7 @@ void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigne
 
     WriteRAMByte(g, (unsigned char)c);
 
-    HandleEvents(g, 0);
+    HandleEvents(g, 0, 256);
 
     status_report(g, &status_report_time, i, length);
   }
@@ -496,13 +496,13 @@ static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long leng
       exit(-1);
     }
 
-    //HandleEvents(g, 0);
+    //HandleEvents(g, 0, 256);
   }
 }
 
-void HandleEvents(gscomms * g, long timeout_ms) {
+void HandleEvents(gscomms * g, long timeout_ms, int max_pending_writes) {
   if (g->async) {
-    if (g->writes_pending > 256) {
+    if (g->writes_pending > max_pending_writes) {
       struct timeval tv = {
         .tv_sec = 0,
         .tv_usec = timeout_ms*1000
@@ -533,9 +533,8 @@ static void WriteRAMFinish(gscomms * g) {
         .tv_sec = 0,
         .tv_nsec = 100*1000*1000
       };
-      nanosleep(&hundredms, NULL);
 
-      HandleEvents(g, TIMEOUT);
+      HandleEvents(g, TIMEOUT, 0);
 
       if (g->writes_pending > 0) {
         printf("waiting on %d writes\n", g->writes_pending);
