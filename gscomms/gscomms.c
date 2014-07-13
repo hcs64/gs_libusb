@@ -578,6 +578,31 @@ gscomms * setup_gscomms() {
   }
 
 
+  const char * speed_string;
+
+  rc = libusb_get_device_speed(libusb_get_device(g->dev));
+  switch (rc) {
+    case LIBUSB_SPEED_LOW:
+      speed_string = "Low (1.5MBit/s)";
+      break;
+    case LIBUSB_SPEED_FULL:
+      speed_string = "Full (12MBit/s)";
+      break;
+    case LIBUSB_SPEED_HIGH:
+      speed_string = "High (480MBit/s)";
+      break;
+    case LIBUSB_SPEED_SUPER:
+      speed_string = "Super (5000MBit/s)";
+      break;
+    default:
+      speed_string = "unknown";
+      break;
+  }
+  printf("Device speed: %s\n", speed_string);
+
+  rc = libusb_get_max_packet_size(libusb_get_device(g->dev), ENDPOINT_MOS_BULK_WRITE);
+  printf("Max bulk write packet: %d bytes\n", rc);
+
   set_mode(g, GSCOMMS_MODE_STANDARD);
 
   g->async = 1;
