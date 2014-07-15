@@ -529,11 +529,6 @@ static void WriteRAMByte(gscomms * g, unsigned char b) {
 static void WriteRAMFinish(gscomms * g) {
   if (g->async) {
     while (g->writes_pending > 0) {
-      static const struct timespec hundredms = {
-        .tv_sec = 0,
-        .tv_nsec = 100*1000*1000
-      };
-
       HandleEvents(g, TIMEOUT, 0);
 
       if (g->writes_pending > 0) {
