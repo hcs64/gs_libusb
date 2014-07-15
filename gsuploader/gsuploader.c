@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libusb-1.0/libusb.h>
-#include <arpa/inet.h>  // for htons
 #include <unistd.h>
 
 #include "mips.h"
@@ -146,7 +145,7 @@ typedef struct {
 
 #define EMBEDDED_ENTRY(_codebuf) {  \
   .codebuf = _codebuf,              \
-  .size = sizeof(_codebuf), \
+  .size = sizeof(_codebuf)/sizeof(_codebuf[0]), \
   .name = #_codebuf \
 }
 
@@ -295,14 +294,16 @@ int upload_embedded(gscomms * g)
 
     ecp->ram_address = embed_addr;
 
+    unsigned char packbuf[ecp->size * 4];
+
     /* byteswap */
-    for(j=0;j<ecp->size/sizeof(ecp->codebuf[0]);j++)
+    for(j=0;j<ecp->size;j++)
     {
-      ecp->codebuf[j] = htonl(ecp->codebuf[j]);
+      write32BE(packbuf+j*4, ecp->codebuf[j]);
     }
 
     /*Upload embedded code */
-    if(Upload(g, (unsigned char *)ecp->codebuf, ecp->size, embed_addr))
+    if(Upload(g, packbuf, ecp->size * 4, embed_addr))
     {
       printf("Failed to upload embedded code %s...\n", ecp->name);
       do_clear(g);
@@ -310,7 +311,6 @@ int upload_embedded(gscomms * g)
     }
 
     printf("Uploaded embedded code %s to: 0x%08lx.\n", ecp->name, embed_addr);
-
 
     /* upload GOT entry */
 
@@ -326,7 +326,7 @@ int upload_embedded(gscomms * g)
 
     printf("%d: 0x%lx: GOT: 0x%lx\n", i, embed_addr, got_addr);
 
-    embed_addr += ecp->size;
+    embed_addr += ecp->size * 4;
     got_addr += GOT_ENTRY_SIZE;
   }
 
