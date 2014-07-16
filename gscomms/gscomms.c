@@ -47,7 +47,7 @@ static const int MAX_SPIN = 10000;
 
 static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length);
 static void WriteRAMByte(gscomms * g, unsigned char b);
-static void WriteRAMFinish(gscomms * g);
+static void WriteRAMFinish(gscomms * g, unsigned char checksum);
 // 
 
 static const struct timespec hundredms = {
@@ -538,8 +538,11 @@ int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsig
   printf("Uploading to %x\n", (int)address);
 
   time_t status_report_time = 0;
+  unsigned char checksum = 0;
 
   for (unsigned long i = 0; i < length; i++) {
+    checksum = (checksum + buf[i]) & 0xff;
+
     WriteRAMByte(g, buf[i]);
 
     HandleEvents(g, 0, 256);
@@ -547,7 +550,7 @@ int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsig
     status_report(g, &status_report_time, i, length);
   }
 
-  WriteRAMFinish(g);
+  WriteRAMFinish(g, checksum);
 
   status_report(g, NULL, length, length);
   printf("\n");
@@ -571,6 +574,7 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
     return 1;
   }
 
+  unsigned char checksum = 0;
 
   WriteRAMStart(g, address, length);
 
@@ -591,6 +595,10 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
       if (got != todo) {
         fprintf(stderr, "hit EOF before writing all bytes\n");
         exit(-1);
+      }
+
+      for (int j = 0; j < got; j++) {
+        checksum = (checksum + buf[j]) & 0xff;
       }
 
       while (g->writes_pending > 32) {
@@ -620,6 +628,8 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
         exit(-1);
       }
 
+      checksum = (checksum + (unsigned char)c) & 0xff;
+
       WriteRAMByte(g, (unsigned char)c);
 
       HandleEvents(g, 0, 256);
@@ -629,7 +639,7 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
   }
 
 
-  WriteRAMFinish(g);
+  WriteRAMFinish(g, checksum);
 
   status_report(g, NULL, length, length);
   printf("\n");
@@ -691,7 +701,7 @@ static void WriteRAMByte(gscomms * g, unsigned char b) {
     }
 }
 
-static void WriteRAMFinish(gscomms * g) {
+static void WriteRAMFinish(gscomms * g, unsigned char checksum) {
   if (g->writes_pending > 0) {
     printf("waiting on %d writes\n", g->writes_pending);
   }
@@ -705,7 +715,13 @@ static void WriteRAMFinish(gscomms * g) {
     sleep(1);
   }
 
-  EndTransaction(g, 0);
+  unsigned char remote_checksum = EndTransaction(g, 0);
+  if (checksum != remote_checksum) {
+    printf("Checksum mismatch %02x != %02x\n", checksum, remote_checksum);
+  } else {
+    printf("Checksum %02x OK\n", checksum);
+  }
+
 }
 
 void Disconnect(gscomms * g) {
