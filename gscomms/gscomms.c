@@ -484,8 +484,12 @@ char * GetGSVersion(gscomms * g) {
 
 unsigned char EndTransaction(gscomms * g, unsigned char checksum) {
   if (g->mode == GSCOMMS_MODE_BULK) {
-    // avoid confusion with residual flags
-    Write32(g, 0);
+    // avoid being tripped up by a dangling flag
+    WriteNibble(g, 0);
+    ReadWriteNibble(g, 0);
+    ReadWriteByte(g, 0);
+    ReadWriteByte(g, 0);
+    ReadWriteByte(g, 0);
   } else {
     ReadWrite32(g, 0);
   }
@@ -638,10 +642,14 @@ static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long leng
 
   ReadWriteByte(g, 2);
   ReadWrite32(g, address);
-
   if (g->mode == GSCOMMS_MODE_BULK) {
     // bulk mode may throw up flags before we detect clear
-    Write32(g, length);
+    ReadWriteByte(g, length >> 24);
+    ReadWriteByte(g, length >> 16);
+    ReadWriteByte(g, length >> 8);
+    ReadWriteNibble(g, length >> 4);
+    WriteNibble(g, length);
+    //Write32(g, length);
   } else {
     ReadWrite32(g, length);
   }
@@ -694,16 +702,24 @@ static void WriteRAMFinish(gscomms * g) {
 
   if (g->mode == GSCOMMS_MODE_BULK) {
     set_mos_mode(g, MOS_SPP_MODE);
-
+    sleep(1);
   }
 
   EndTransaction(g, 0);
 }
 
 void Disconnect(gscomms * g) {
-  Handshake(g, 1);
-  ReadWriteByte(g, 'd');
+  for (int i = 0; i < 16; i++) {
+    if (Handshake(g, 1)) {
+      unsigned char resp = ReadWriteByte(g, 'd');
+      printf("OK, Disconnect responded %02x\n", resp);
+      return;
+    }
+    printf("retry disconnect handshake\n");
+  }
+  fprintf(stderr, "Disconnect failed\n");
 }
+
 
 ///
 

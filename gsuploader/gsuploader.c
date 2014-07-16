@@ -151,11 +151,18 @@ int main(int argc, char ** argv)
   fclose(infile1);
 
   {
-    //set_mode(g, GSCOMMS_MODE_FAST);
+    // TODO: figure out what is going on that makes this necessary
+    int was_bulk = 0;
+    if (g->mode == GSCOMMS_MODE_BULK) {
+      was_bulk = 1;
+      set_mode(g, GSCOMMS_MODE_FAST);
+    }
     code_block * setup_j_cb = generate_jump(setup_addr, "patch into code list");
     upload_cb(g, setup_j_cb, INSN_PATCH_ADDR);
     free_cb(setup_j_cb);
-    //set_mode(g, GSCOMMS_MODE_BULK);
+    if (was_bulk) {
+      set_mode(g, GSCOMMS_MODE_BULK);
+    }
   }
 
   Disconnect(g);
@@ -177,7 +184,12 @@ int main(int argc, char ** argv)
     }
 
     WriteRAMfromFile(g, infile2, UPLOAD_ADDR, -1);
+
     fclose(infile2);
+
+    // TODO: find out why this seems necessary, probably some residual stuff from the bulk transfer
+    ReadRAM(g, NULL, UPLOAD_ADDR, 4);
+
     Disconnect(g);
   }
 

@@ -157,7 +157,8 @@ code_block * generate_2x_receive( ) {
   );
 }
 
-#define ACK_PULSE_WIDTH 4
+#if 0
+#define ACK_PULSE_WIDTH 10
 #define GS_WRITE_PORT 0x80787C24
 
 //              nERR  nBUSY nACK
@@ -169,7 +170,7 @@ code_block * generate_2x_receive( ) {
 
 #define SIMULATE_PROMPT \
   JAL(GS_WRITE_PORT), \
-  ORI(A0, R0, 0x04)  \
+  ORI(A0, R0, 0x14)  \
 
 #define SIMULATE_ACK \
   JAL(GS_WRITE_PORT), \
@@ -178,7 +179,124 @@ code_block * generate_2x_receive( ) {
   BNE(A0, R0, -1*4),  \
   ADDIU(A0, A0, -1),  \
   JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x14)
+
+#define ACK_AND_CLEANUP \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x10),  \
+  ORI(A0, R0, ACK_PULSE_WIDTH), \
+  BNE(A0, R0, -1*4),  \
+  ADDIU(A0, A0, -1),  \
+  JAL(GS_WRITE_PORT), \
   ORI(A0, R0, 0x04)
+
+code_block * generate_bulk_receive( ) {
+  unsigned long codebuf_bulk_receive[] = {
+    /* Function: bulk receive byte */
+    ADDIU(SP, SP, 0xFFD8),
+    SW(S0, 0x10, SP),
+    SW(S1, 0x14, SP),
+    SW(S2, 0x18, SP),
+    SW(RA, 0x1C, SP),
+
+    SIMULATE_PROMPT,
+
+    /* wait for consistent high nibble */
+    ORI(S2, R0, DEBOUNCE_COUNT),
+    JAL(GS_READ_PORT),
+    NOP,
+    ANDI(S1, V0, 0x1F),
+    ANDI(A0, V0, 0x10),
+    BEQ(A0, R0, -6*4),
+    NOP,
+
+    JAL(GS_READ_PORT),
+    NOP,
+    ANDI(A0, V0, 0x1F),
+    BNE(A0, S1, -11*4),
+    ANDI(V0, V0, 0xF),
+    BNE(S2, R0, -6*4),
+    ADDIU(S2, S2, -1),
+
+/* collect the nibble */
+    SLL(S0, V0, 4),
+
+    SIMULATE_ACK,
+
+    /* wait for consistent low nibble */
+    ORI(S2, R0, DEBOUNCE_COUNT),
+    JAL(GS_READ_PORT),
+    NOP,
+    ANDI(S1, V0, 0x1F),
+    ANDI(A0, V0, 0x10),
+    BNE(A0, R0, -6*4),
+    NOP,
+
+    JAL(GS_READ_PORT),
+    NOP,
+    ANDI(A0, V0, 0x1F),
+    BNE(A0, S1, -11*4),
+    ANDI(V0, V0, 0xF),
+    BNE(S2, R0, -6*4),
+    ADDIU(S2, S2, -1),
+
+    /* collect the nibble */
+    OR(S0, S0, V0),
+
+    SIMULATE_ACK,
+
+    /* load return value */
+    OR(V0, S0, R0),
+    /* restore saved regs */
+    LW(S0, 0x10, SP),
+    LW(S1, 0x14, SP),
+    LW(S2, 0x18, SP),
+    LW(RA, 0x1C, SP),
+    ADDIU(SP, SP, +0x28),
+    JR(RA),
+    NOP,
+  };
+
+  return cb_from_dwords(
+    codebuf_bulk_receive,
+    sizeof(codebuf_bulk_receive)/sizeof(codebuf_bulk_receive[0]),
+    "bulk receive driver"
+  );
+}
+#endif
+
+#if 1
+#define ACK_PULSE_WIDTH 2
+#define GS_WRITE_PORT 0x80787C24
+
+//              nERR  nBUSY nACK
+// 0x00 = 0x80  0     1     0
+// 0x10 = 0x88  1     1     0
+// 0x14 = 0xC8  1     1     1
+// 0x18 = 0x08  1     0     0
+// 0x1C = 0x48  1     0     1
+
+#define SIMULATE_PROMPT \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x14)  \
+
+#define SIMULATE_ACK \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x10),  \
+  ORI(A0, R0, ACK_PULSE_WIDTH), \
+  BNE(A0, R0, -1*4),  \
+  ADDIU(A0, A0, -1),  \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x14)
+
+#define ACK_AND_CLEANUP \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x10),  \
+  ORI(A0, R0, ACK_PULSE_WIDTH), \
+  BNE(A0, R0, -1*4),  \
+  ADDIU(A0, A0, -1),  \
+  JAL(GS_WRITE_PORT), \
+  ORI(A0, R0, 0x00)
 
 code_block * generate_bulk_receive( ) {
   unsigned long codebuf_bulk_receive[] = {
@@ -225,7 +343,7 @@ code_block * generate_bulk_receive( ) {
     /* collect the nibble */
     OR(S0, S0, V0),
 
-    SIMULATE_ACK,
+    ACK_AND_CLEANUP,
 
     /* load return value */
     OR(V0, S0, R0),
@@ -238,10 +356,10 @@ code_block * generate_bulk_receive( ) {
     JR(RA),
     NOP,
   };
-
   return cb_from_dwords(
     codebuf_bulk_receive,
     sizeof(codebuf_bulk_receive)/sizeof(codebuf_bulk_receive[0]),
     "bulk receive driver"
   );
 }
+#endif
