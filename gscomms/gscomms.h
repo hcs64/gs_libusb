@@ -8,7 +8,6 @@ typedef struct {
   libusb_context * ctx;
   libusb_device_handle * dev;
 
-  int async;
   int mode;
   int writes_pending;
 } gscomms;

@@ -21,10 +21,10 @@ int upload_cb(gscomms * g, code_block * cb, unsigned long address);
 
 
 // flag: use 2x transfer?
-#define USE_FAST_RECEIVE 1
+#define USE_FAST_RECEIVE 0
 
-// flag: use (2x) bulk transfer?
-#define USE_BULK_RECEIVE 0
+// flag: use bulk 2x transfer?
+#define USE_BULK_RECEIVE 1
 
 int main(int argc, char ** argv)
 {
@@ -119,7 +119,7 @@ int main(int argc, char ** argv)
 
 #if USE_FAST_RECEIVE || USE_BULK_RECEIVE
   {
-    code_block * recv_jal_cb = generate_jal(byte_loader_addr, "Loader patch");
+    code_block * recv_jal_cb = generate_jal(byte_loader_addr, "upload driver patch");
 
     upload_cb(g, recv_jal_cb, GET_BYTE_PATCH_ADDR);
 
@@ -151,9 +151,11 @@ int main(int argc, char ** argv)
   fclose(infile1);
 
   {
-    code_block * setup_j_cb = generate_jump(setup_addr, "Patch into code engine");
+    //set_mode(g, GSCOMMS_MODE_FAST);
+    code_block * setup_j_cb = generate_jump(setup_addr, "patch into code list");
     upload_cb(g, setup_j_cb, INSN_PATCH_ADDR);
     free_cb(setup_j_cb);
+    //set_mode(g, GSCOMMS_MODE_BULK);
   }
 
   Disconnect(g);
@@ -186,6 +188,6 @@ int main(int argc, char ** argv)
 }
 
 int upload_cb(gscomms * g, code_block * cb, unsigned long address) {
-  printf("Uploading \"%s\" (%u bytes)\n", cb->name, (unsigned int)cb->size);
+  printf("Send %s\n", cb->name);
   return WriteRAM(g, cb->code, address, cb->size);
 }
