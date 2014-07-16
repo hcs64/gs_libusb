@@ -8,8 +8,8 @@ all: gsuploader/gsuploader
 
 .PHONY: clean
 
-gsuploader/gsuploader: gsuploader/gsuploader.c gsuploader/mips.h $(COMMON_DEPS)
-	$(CC) $(CFLAGS) gsuploader/gsuploader.c $(COMMON_SRC) -o gsuploader/gsuploader $(LDFLAGS)
+gsuploader/gsuploader: gsuploader/gsuploader.c gsuploader/mips.h gsuploader/codegen.c gsuploader/codegen.h $(COMMON_DEPS)
+	$(CC) $(CFLAGS) gsuploader/gsuploader.c gsuploader/codegen.c $(COMMON_SRC) -o gsuploader/gsuploader $(LDFLAGS)
 
 clean:
 	rm -f gsuploader/gsuploader 

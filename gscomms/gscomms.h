@@ -48,9 +48,9 @@ unsigned char EndTransaction(gscomms * g, unsigned char checksum);
 
 // basic GS commands
 char * GetGSVersion(gscomms * g);
-void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length);
-void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length);
-void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length);
+int ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length);
+int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length);
+int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length);
 
 // do outstanding asynchronous processing for libusb
 void HandleEvents(gscomms * g, long timeout_ms, int max_pending_writes);

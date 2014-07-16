@@ -48,8 +48,18 @@ static void WriteRAMByte(gscomms * g, unsigned char b);
 static void WriteRAMFinish(gscomms * g);
 // 
 
+static const struct timespec hundredms = {
+  .tv_sec = 0,
+  .tv_nsec = 100*1000*1000
+};
+
+// TODO: this needs to be changed over to the split between set_mode and set_mos_mode in bulk-fifo3
 void set_mode(gscomms * g, int mode) {
   uint8_t mos_mode;
+
+  // a chance for any ongoing transmissions to finish
+  // TODO: this should really be using the 7705's status
+  nanosleep(&hundredms, NULL);
 
   switch (mode) {
     case GSCOMMS_MODE_CAREFUL:
@@ -300,10 +310,6 @@ int InitGSCommsNoisy(gscomms * g, int retries, int noisy) {
   int got_it = 0;
 
   for (int i = 0; i < retries; i++) {
-    static const struct timespec hundredms = {
-      .tv_sec = 0,
-      .tv_nsec = 100*1000*1000
-    };
 
     do_write(g, 3, 1);
 
@@ -390,7 +396,7 @@ unsigned char EndTransaction(gscomms * g, unsigned char checksum) {
   return ReadWriteByte(g, checksum);
 }
 
-void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length) {
+int ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned long length) {
   Handshake(g, 1);
 
   ReadWriteByte(g, 1);
@@ -406,6 +412,8 @@ void ReadRAM(gscomms * g, unsigned char *buf, unsigned long address, unsigned lo
   }
 
   EndTransaction(g, 0);
+
+  return 0;
 }
 
 static inline void status_report(gscomms * g, time_t * status_report_time, unsigned long i, unsigned long length) {
@@ -423,7 +431,7 @@ static inline void status_report(gscomms * g, time_t * status_report_time, unsig
 }
 
 
-void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length) {
+int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length) {
   WriteRAMStart(g, address, length);
 
   printf("Uploading to %x\n", (int)address);
@@ -439,9 +447,11 @@ void WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsi
   }
 
   WriteRAMFinish(g);
+
+  return 0;
 }
 
-void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length) {
+int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned long length) {
   if (length == (unsigned long)-1) {
     fseek(infile, 0, SEEK_END);
     length = ftell(infile);
@@ -454,7 +464,7 @@ void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigne
   }
 
   if (length < 1) {
-    return;
+    return 1;
   }
 
 
@@ -481,6 +491,8 @@ void WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigne
   WriteRAMFinish(g);
 
   status_report(g, NULL, length, length);
+
+  return 0;
 }
 
 static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long length) {
@@ -528,12 +540,12 @@ static void WriteRAMByte(gscomms * g, unsigned char b) {
 
 static void WriteRAMFinish(gscomms * g) {
   if (g->async) {
+    if (g->writes_pending > 0) {
+      printf("waiting on %d writes\n", g->writes_pending);
+    }
+
     while (g->writes_pending > 0) {
       HandleEvents(g, TIMEOUT, 0);
-
-      if (g->writes_pending > 0) {
-        printf("waiting on %d writes\n", g->writes_pending);
-      }
     }
   }
 
