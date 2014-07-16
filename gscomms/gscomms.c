@@ -94,49 +94,6 @@ void set_mos_mode(gscomms * g, int mos_mode) {
   }
 }
 
-#if 0
-void get_clock(gscomms * g) {
-  unsigned char data;
-  int rc = libusb_control_transfer(
-      g->dev,
-      REQTYPE_READ,
-      REQ_MOS_READ,
-      MOS_PORT_BASE,
-      MOS_PP_DEBUG_REG,
-      &data,
-      1,
-      TIMEOUT);
-
-  if (rc != 1) {
-    fprintf(stderr, "clock read failed: %s\n", libusb_error_name(rc));
-    exit(-1);
-  }
-
-  printf("PPREG %02x\n", data);
-}
-#endif
-
-#if 0
-void reset_fifo(gscomms * g) {
-  int rc = libusb_control_transfer(
-      g->dev, 
-      REQTYPE_WRITE,
-      REQ_MOS_WRITE,
-      MOS_PORT_BASE | 0x0C,
-      MOS_PP_DEBUG_REG,
-      NULL,
-      0,
-      TIMEOUT
-      );
-
-  if (rc != 0) {
-    fprintf(stderr, "fifo reset failed: %s\n", libusb_error_name(rc));
-    exit(-1);
-  }
-}
-#endif
-
-
 uint8_t do_raw_read(gscomms * g) {
   unsigned char data;
 
