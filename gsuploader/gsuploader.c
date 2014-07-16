@@ -186,9 +186,6 @@ int main(int argc, char ** argv)
 
     fclose(infile2);
 
-    // TODO: find out why this seems necessary, probably some residual stuff from the bulk transfer
-    ReadRAM(g, NULL, UPLOAD_ADDR, 4);
-
     Disconnect(g);
   }
 

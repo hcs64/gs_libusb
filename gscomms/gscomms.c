@@ -116,6 +116,27 @@ void get_clock(gscomms * g) {
 }
 #endif
 
+#if 0
+void reset_fifo(gscomms * g) {
+  int rc = libusb_control_transfer(
+      g->dev, 
+      REQTYPE_WRITE,
+      REQ_MOS_WRITE,
+      MOS_PORT_BASE | 0x0C,
+      MOS_PP_DEBUG_REG,
+      NULL,
+      0,
+      TIMEOUT
+      );
+
+  if (rc != 0) {
+    fprintf(stderr, "fifo reset failed: %s\n", libusb_error_name(rc));
+    exit(-1);
+  }
+}
+#endif
+
+
 uint8_t do_raw_read(gscomms * g) {
   unsigned char data;
 
@@ -309,6 +330,38 @@ void do_bulk_write_async(gscomms * g, const uint8_t * data, int length) {
 
 }
 
+void clear_bulk_write_async(gscomms * g) {
+    unsigned char * buf = malloc(1);
+    buf[0] = 0;
+
+    struct libusb_transfer * transfer = libusb_alloc_transfer(0);
+
+    libusb_fill_bulk_transfer(
+        transfer,
+        g->dev,
+        ENDPOINT_MOS_BULK_WRITE,
+        buf,
+        1,
+        do_bulk_write_async_cb,
+        g,
+        TIMEOUT);
+    //printf("transfer call finished\n");
+
+    transfer->flags |= LIBUSB_TRANSFER_FREE_TRANSFER;
+    transfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+    transfer->flags |= LIBUSB_TRANSFER_SHORT_NOT_OK;
+
+    int rc = libusb_submit_transfer(transfer);
+    if (rc != 0) {
+      fprintf(stderr, "submit async bulk clear failed: %s\n", libusb_error_name(rc));
+      do_clear(g);
+      set_mos_mode(g, MOS_SPP_MODE);
+      exit(-1);
+    }
+
+    g->writes_pending ++;
+}
+
 unsigned char ReadWriteNibble(gscomms * g, unsigned char x) {
   int spin[2] = {0,0};
   do_write(g, x & 0xf, 1);
@@ -343,18 +396,15 @@ unsigned char ReadWriteNibble(gscomms * g, unsigned char x) {
 
 
 void WriteNibble(gscomms * g, unsigned char x) {
-  //if (g->mode == GSCOMMS_MODE_CAREFUL) {
-    do_write(g, x & 0xf, 1);
-    do_clear(g);
-  /*} else {
-    do_write_async(g, x & 0xf, 1);
-    do_clear_async(g);
-  }*/
+  do_write(g, x & 0xf, 1);
+  do_clear(g);
 }
 
 
 unsigned char ReadWriteByte(gscomms * g, unsigned char b) {
-  return (ReadWriteNibble(g, b>>4)<<4)|ReadWriteNibble(g, b);
+  unsigned char result = (ReadWriteNibble(g, b>>4)<<4)|ReadWriteNibble(g, b);
+  //printf("W:%02x R:%02x\n", b, result);
+  return result;
 }
 
 void WriteByte(gscomms * g, unsigned char b) {
@@ -371,10 +421,12 @@ unsigned char ReadByte(gscomms * g) {
 }
 
 unsigned long ReadWrite32(gscomms * g, unsigned long v) {
-  return (((unsigned long)ReadWriteByte(g, v>>24))<<24) |
+  unsigned long result = (((unsigned long)ReadWriteByte(g, v>>24))<<24) |
     (((unsigned long)ReadWriteByte(g, v>>16))<<16) |
     (((unsigned long)ReadWriteByte(g, v>> 8))<< 8) |
     ReadWriteByte(g, v);
+  //printf("W:%08lx R:%08lx\n",v, result);
+  return result;
 }
 
 void Write32(gscomms * g, unsigned long v) {
@@ -483,16 +535,7 @@ char * GetGSVersion(gscomms * g) {
 }
 
 unsigned char EndTransaction(gscomms * g, unsigned char checksum) {
-  if (g->mode == GSCOMMS_MODE_BULK) {
-    // avoid being tripped up by a dangling flag
-    WriteNibble(g, 0);
-    ReadWriteNibble(g, 0);
-    ReadWriteByte(g, 0);
-    ReadWriteByte(g, 0);
-    ReadWriteByte(g, 0);
-  } else {
-    ReadWrite32(g, 0);
-  }
+  ReadWrite32(g, 0);
   ReadWrite32(g, 0);
   return ReadWriteByte(g, checksum);
 }
@@ -557,7 +600,7 @@ int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsig
 
       do_bulk_write_async(g, &buf[i], todo);
 
-      HandleEvents(g, 0, 256);
+      HandleEvents(g, 0, 512);
     }
   } else {
     for (unsigned long i = 0; i < length; i++) {
@@ -605,12 +648,13 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
 
   if (g->mode == GSCOMMS_MODE_BULK) {
     const int maxlen = 256;
+    int todo;
     unsigned char buf[maxlen];
-    for (unsigned long i = 0; i < length; ) {
+    for (unsigned long i = 0; i < length; i += todo) {
       status_report(g, &status_report_time, i, length);
 
-      int todo = maxlen;
-      if (todo > length - i) {
+      todo = maxlen;
+      if (todo + i > length) {
         todo = length - i;
       }
 
@@ -625,15 +669,12 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
         checksum = (checksum + buf[j]) & 0xff;
       }
 
-      while (g->writes_pending > 32) {
+      while (g->writes_pending > 1024) {
         struct timeval tv = { .tv_sec = 0, .tv_usec = 100*1000 };
         libusb_handle_events_timeout(g->ctx, &tv);
       }
 
       do_bulk_write_async(g, buf, todo);
-
-      i += todo;
-
     }
 
     while (g->writes_pending > 0) {
@@ -676,6 +717,7 @@ static void WriteRAMStart(gscomms * g, unsigned long address, unsigned long leng
 
   ReadWriteByte(g, 2);
   ReadWrite32(g, address);
+
   if (g->mode == GSCOMMS_MODE_BULK) {
     // bulk mode may throw up flags before we detect clear
     ReadWriteByte(g, length >> 24);
@@ -730,13 +772,18 @@ static void WriteRAMFinish(gscomms * g, unsigned char checksum) {
     printf("waiting on %d writes\n", g->writes_pending);
   }
 
+  if (g->mode == GSCOMMS_MODE_BULK) {
+    // make sure the last output is 0
+    clear_bulk_write_async(g);
+  }
+
   while (g->writes_pending > 0) {
+    nanosleep(&hundredms, NULL);
     HandleEvents(g, TIMEOUT, 0);
   }
 
   if (g->mode == GSCOMMS_MODE_BULK) {
     set_mos_mode(g, MOS_SPP_MODE);
-    sleep(1);
   }
 
   unsigned char remote_checksum = EndTransaction(g, 0);
