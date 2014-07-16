@@ -9,8 +9,16 @@
 
 int upload_cb(gscomms * g, code_block * cb, unsigned long address);
 
+#define NEON64_MODE 1
+
+#if NEON64_MODE
 #define UPLOAD_ADDR 0x80300000UL
 #define ENTRYPOINT  0x80300000UL
+#else
+#define UPLOAD_ADDR 0xA0000400UL
+#define ENTRYPOINT  0x80000400UL
+#endif
+
 #define EMBED_ADDR  0xA0300000UL-1024
 
 // GS Code Handler(uncached)
@@ -151,18 +159,9 @@ int main(int argc, char ** argv)
   fclose(infile1);
 
   {
-    // TODO: figure out what is going on that makes this necessary
-    int was_bulk = 0;
-    if (g->mode == GSCOMMS_MODE_BULK) {
-      was_bulk = 1;
-      set_mode(g, GSCOMMS_MODE_FAST);
-    }
     code_block * setup_j_cb = generate_jump(setup_addr, "patch into code list");
     upload_cb(g, setup_j_cb, INSN_PATCH_ADDR);
     free_cb(setup_j_cb);
-    if (was_bulk) {
-      set_mode(g, GSCOMMS_MODE_BULK);
-    }
   }
 
   Disconnect(g);

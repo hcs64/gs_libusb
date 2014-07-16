@@ -535,19 +535,41 @@ static inline void status_report(gscomms * g, time_t * status_report_time, unsig
 int WriteRAM(gscomms * g, const unsigned char *buf, unsigned long address, unsigned long length) {
   WriteRAMStart(g, address, length);
 
-  printf("Uploading to %x\n", (int)address);
+  printf("Uploading %lu to %lx\n", length, address);
 
   time_t status_report_time = 0;
   unsigned char checksum = 0;
 
-  for (unsigned long i = 0; i < length; i++) {
-    checksum = (checksum + buf[i]) & 0xff;
+  if (g->mode == GSCOMMS_MODE_BULK) {
+    const int maxlen = 256;
+    int todo;
+    for (unsigned long i = 0; i < length; i += todo) {
+      status_report(g, &status_report_time, i, length);
 
-    WriteRAMByte(g, buf[i]);
+      todo = maxlen;
+      if (i + todo > length) {
+        todo = length - i;
+      }
 
-    HandleEvents(g, 0, 256);
+      for (int j = 0; j < todo; j++) {
+        checksum = (checksum + buf[i+j]) & 0xff;
+      }
 
-    status_report(g, &status_report_time, i, length);
+      do_bulk_write_async(g, &buf[i], todo);
+
+      HandleEvents(g, 0, 256);
+    }
+  } else {
+    for (unsigned long i = 0; i < length; i++) {
+      status_report(g, &status_report_time, i, length);
+
+      checksum = (checksum + buf[i]) & 0xff;
+
+      WriteRAMByte(g, buf[i]);
+
+
+      HandleEvents(g, 0, 256);
+    }
   }
 
   WriteRAMFinish(g, checksum);
@@ -579,12 +601,14 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
   WriteRAMStart(g, address, length);
 
   time_t status_report_time = 0;
-  printf("Uploading %lu to %lx\n", (unsigned long)length, (unsigned long)address);
+  printf("Uploading %lu to %lx\n", length, address);
 
   if (g->mode == GSCOMMS_MODE_BULK) {
     const int maxlen = 256;
     unsigned char buf[maxlen];
     for (unsigned long i = 0; i < length; ) {
+      status_report(g, &status_report_time, i, length);
+
       int todo = maxlen;
       if (todo > length - i) {
         todo = length - i;
@@ -610,7 +634,6 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
 
       i += todo;
 
-      status_report(g, &status_report_time, i, length);
     }
 
     while (g->writes_pending > 0) {
@@ -621,6 +644,8 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
   } else {
 
     for (unsigned long i = 0; i < length; i++) {
+      status_report(g, &status_report_time, i, length);
+
       int c = fgetc(infile);
 
       if (c == EOF) {
@@ -634,7 +659,6 @@ int WriteRAMfromFile(gscomms * g, FILE * infile, unsigned long address, unsigned
 
       HandleEvents(g, 0, 256);
 
-      status_report(g, &status_report_time, i, length);
     }
   }
 
