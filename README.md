@@ -4,7 +4,8 @@ gs_libusb
 N64 GameShark Pro utilities using libusb.
 
 This is based around the MosChip MCS7705 USB to Parallel Port bridge, which is
-found in the [Tera Grand adapter][teragrand].
+found in the [Tera Grand][teragrand] (aka [Viewcon][viewcon]) adapter,
+available on [amazon][Amazon.com] and elsewhere.
 
 Subdirectories:
 - gsuploader: homebrew loader based on ppcasm's "gsuploader"
@@ -12,7 +13,8 @@ Subdirectories:
 - examples: a few example executables for use with gsuploader
 
 [teragrand]: http://www.teragrand.com/product-p/usb-ve349.htm
-
+[viewcon]: http://www.wiretek.com.cn/productshow.aspx?ProdId=921
+[amazon]: http://amzn.com/B007MTQ2QS
 
 # gsuploader
 
