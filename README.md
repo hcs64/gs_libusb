@@ -24,7 +24,7 @@ reorganization.
 gsuploader is a code loader for the N64 using the GameShark Pro 3.3's
 parallel port and "Code Generator" functionality. This version adds:
 
-- support for USB to parallel adaptors using the MosChip MCS7705 bridge
+- support for USB to parallel adapters using the MosChip MCS7705 bridge
 - a 2x speed transfer driver (supported by gscomms)
 - a fast bulk transfer driver (supported by gscomms)
 
