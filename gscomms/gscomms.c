@@ -377,6 +377,12 @@ unsigned char ReadByte(gscomms * g) {
   return ReadWriteByte(g, 0);
 }
 
+unsigned short ReadWrite16(gscomms * g, unsigned short v) {
+  unsigned short result = (((unsigned short)ReadWriteByte(g, v>> 8))<< 8) |
+    ReadWriteByte(g, v);
+  return result;
+}
+
 unsigned long ReadWrite32(gscomms * g, unsigned long v) {
   unsigned long result = (((unsigned long)ReadWriteByte(g, v>>24))<<24) |
     (((unsigned long)ReadWriteByte(g, v>>16))<<16) |
@@ -436,7 +442,9 @@ int InitGSCommsNoisy(gscomms * g, int retries, int noisy) {
     return 0;
   }
 
-  printf("\n");
+  if (!quiet) {
+    printf("\n");
+  }
 
   return 1; //Handshake(g, quiet);
 }
@@ -755,8 +763,7 @@ static void WriteRAMFinish(gscomms * g, unsigned char checksum) {
 void Disconnect(gscomms * g) {
   for (int i = 0; i < 16; i++) {
     if (Handshake(g, 1)) {
-      unsigned char resp = ReadWriteByte(g, 'd');
-      printf("OK, Disconnect responded %02x\n", resp);
+      ReadWriteByte(g, 'd');
       return;
     }
     printf("retry disconnect handshake\n");

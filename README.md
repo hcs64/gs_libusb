@@ -61,6 +61,6 @@ to 0 before compiling. It can then be loaded with
 
     ./gsuploader/gsuploader examples/flames.bin
 
-Hope it is useful for someone.
+# gsdemo2
 
--hcs
+A demonstration (by nefariousdogooder) of setting cheat codes.

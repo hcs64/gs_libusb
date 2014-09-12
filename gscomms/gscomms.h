@@ -41,6 +41,7 @@ void Disconnect(gscomms * g);
 unsigned char ReadWriteByte(gscomms * g, unsigned char b);
 void WriteByte(gscomms * g, unsigned char b);
 unsigned char ReadByte(gscomms * g);
+unsigned short ReadWrite16(gscomms * g, unsigned short v);
 unsigned long ReadWrite32(gscomms * g, unsigned long v);
 void Write32(gscomms * g, unsigned long v);
 unsigned char EndTransaction(gscomms * g, unsigned char checksum);
