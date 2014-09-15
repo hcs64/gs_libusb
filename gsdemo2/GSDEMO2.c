@@ -57,8 +57,8 @@ printf("\nDone.  Press [Enter] to continue.");
 getchar();
 
 printf("\n\nNext to toggle the code lists.");
-printf("\nThey were %s",GetCodeState(g) ? "on":"off");
-printf(" and now they are %s\n(hopefully that reads off!)",SetCodeState(g,0) ? "on":"off");
+printf("\nThey were %s", GetCodeState(g) ? "off":"on");
+printf(" and now they are %s", SetCodeState(g,-1) ? "off":"on");
 
 // Disable this test for now as the editor doesn't seem to work with this
 // modification.
