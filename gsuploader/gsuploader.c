@@ -9,30 +9,34 @@
 
 int upload_cb(gscomms * g, code_block * cb, unsigned long address);
 
-#define NEON64_MODE 1
+// #define NEON64_MODE 1 - No longer needed as neon64 mode is automated now.
 
-#if NEON64_MODE
-#define UPLOAD_ADDR 0x80300000UL
-#define ENTRYPOINT  0x80300000UL
-#else
-#define UPLOAD_ADDR 0xA0000400UL
-#define ENTRYPOINT  0x80000400UL
-#endif
+// Change defines below to represent older style arguments (no defined load points)
+//#if NEON64_MODE
+#define DEFAULT_NEON64_UPLOAD_ADDR 0x80300000UL
+#define DEFAULT_NEON64_ENTRYPOINT  0x80300000UL
+//#else
+#define DEFAULT_UPLOAD_ADDR 0x80000400UL // Can use cached area, works great when the code loading sets up cache properly!
+#define DEFAULT_ENTRYPOINT  0x80000400UL
+//#endif
 
-#define EMBED_ADDR  0xA0300000UL-1024
+//GLOBALS BAD!
+unsigned long UPLOAD_ADDR = DEFAULT_NEON64_UPLOAD_ADDR;
+unsigned long ENTRYPOINT = DEFAULT_NEON64_ENTRYPOINT;
+
+#define EMBED_ADDR  0xA0800000UL-1024 // Relocate the preloader code to end of EXP RAM with 1KB allocation (seems safe enough.)
 
 // GS Code Handler(uncached)
-#define INSN_PATCH_ADDR 0xA07C5C00UL 
+#define INSN_PATCH_ADDR 0xA07C5C00UL
 
 // call to receive byte in GS upload
-#define GET_BYTE_PATCH_ADDR 0xA07919B0
-
+#define GET_BYTE_PATCH_ADDR 0xA07919B0UL
 
 // flag: use 2x transfer?
-#define USE_FAST_RECEIVE 0
+#define USE_FAST_RECEIVE 1 // Changed 0->1 - seems more stable
 
 // flag: use bulk 2x transfer?
-#define USE_BULK_RECEIVE 1
+#define USE_BULK_RECEIVE 0 // Changed 1->0 - seems more stable
 
 int main(int argc, char ** argv)
 {
@@ -46,19 +50,39 @@ int main(int argc, char ** argv)
   printf("\nN64 HomeBrew Loader - hcs, ppcasm\n");
   printf("MCS7705 USB version via libusb\n\n");
 
-
-  if (argc == 2)
-  {
+  if (argc == 2 || argc == 4) {
     two_stage = 0;
+    if(argc == 4) {
+       UPLOAD_ADDR = (unsigned long)strtol(argv[2], NULL, 16);
+       ENTRYPOINT = (unsigned long )strtol(argv[3], NULL, 16);
+    }
+    else {
+       UPLOAD_ADDR = DEFAULT_UPLOAD_ADDR;
+       ENTRYPOINT = DEFAULT_ENTRYPOINT;
+    }
+
+    printf("Single-Stage Loader - UPLOAD_ADDR: 0x%08x | ENTRYPOINT: 0x%08x\n\n", (unsigned int)UPLOAD_ADDR, (unsigned int)ENTRYPOINT);
   }
-  else if (argc == 3)
-  {
+  else if (argc == 3 || argc == 5) {
     two_stage = 1;
+    if(argc == 5) {
+       UPLOAD_ADDR = (unsigned long)strtol(argv[3], NULL, 16);
+       ENTRYPOINT = (unsigned long )strtol(argv[4], NULL, 16);
+    }
+    else {
+       UPLOAD_ADDR = DEFAULT_NEON64_UPLOAD_ADDR;
+       ENTRYPOINT = DEFAULT_NEON64_ENTRYPOINT;
+    }
+
+    printf("Two-Stage Loader - UPLOAD_ADDR: 0x%08x | ENTRYPOINT: 0x%08x\n\n", (unsigned int)UPLOAD_ADDR, (unsigned int)ENTRYPOINT);
   }
   else
   {
     printf("Wrong Usage:\n(Homebrew Uploader): %s <binary>\n", argv[0]);
-    printf("(Two Stage Loader): %s <loader> <binary>\n\n", argv[0]);
+    printf("(NEON64GS mode/Two Stage Loader): %s <NEON64GS.BIN/loader> <ROM/binary>\n\n", argv[0]);
+    printf("Alternatively you can specify some addresses using the following:\n\n");
+    printf("(Homebrew Uploader): %s <binary> <upload_address> <_start/entrypoint> <transfer_mode: 0 (BULK) | 1 (FAST)\n", argv[0]);
+    printf("(NEON64GS mode/Two Stage Loader): %s <NEON64GS.BIN/loader> <ROM/binary> <upload_address> <_start/entrypoint> <transfer_mode: 0 (BULK) | 1 (FAST)\n\n", argv[0]);
     return 1;
   }
 
@@ -67,7 +91,7 @@ int main(int argc, char ** argv)
   if(!infile1)
   {
     printf("error opening %s\n", argv[1]);
-    do_clear(g);
+    //do_clear(g); - Not needed, gscomms isn't actually initialized yet and it'll sigsev on fopen error
     return 1;
   }
 
@@ -76,7 +100,7 @@ int main(int argc, char ** argv)
     if(!infile2)
     {
       printf("error opening %s\n", argv[2]);
-      do_clear(g);
+      //do_clear(g); - Not needed, gscomms isn't actually initialized yet and it'll sigsev on fopen error
       return 1;
     }
   }
@@ -92,41 +116,42 @@ int main(int argc, char ** argv)
 
   unsigned long setup_addr;
 #if USE_FAST_RECEIVE || USE_BULK_RECEIVE
-  unsigned long byte_loader_addr;
+     unsigned long byte_loader_addr;
 #endif
 
   {
     // generate embedded code
     code_block *setup_cb = generate_setup(ENTRYPOINT, INSN_PATCH_ADDR);
 #if USE_FAST_RECEIVE
-    code_block *receive_cb = generate_2x_receive();
+       code_block *receive_cb = generate_2x_receive();
 #elif USE_BULK_RECEIVE
-    code_block *receive_cb = generate_bulk_receive();
+       code_block *receive_cb = generate_bulk_receive();
 #endif
 
     // upload embedded code
     unsigned long embed_addr = EMBED_ADDR;
 
-    upload_cb(g, setup_cb, embed_addr);
-    setup_addr = embed_addr;
-    embed_addr += setup_cb->size;
-    embed_addr = (embed_addr + 3)/4*4;
+       upload_cb(g, setup_cb, embed_addr);
+       setup_addr = embed_addr;
+       embed_addr += setup_cb->size;
+       embed_addr = (embed_addr + 3)/4*4;
 
 #if USE_FAST_RECEIVE || USE_BULK_RECEIVE
-    upload_cb(g, receive_cb, embed_addr);
-    byte_loader_addr = embed_addr;
-    embed_addr += receive_cb->size;
-    embed_addr = (embed_addr + 3)/4*4;
+       upload_cb(g, receive_cb, embed_addr);
+       byte_loader_addr = embed_addr;
+       embed_addr += receive_cb->size;
+       embed_addr = (embed_addr + 3)/4*4;
 #endif
 
     free_cb(setup_cb);
 #if USE_FAST_RECEIVE || USE_BULK_RECEIVE
-    free_cb(receive_cb);
+       free_cb(receive_cb);
 #endif
   }
 
 #if USE_FAST_RECEIVE || USE_BULK_RECEIVE
   {
+
     code_block * recv_jal_cb = generate_jal(byte_loader_addr, "upload driver patch");
 
     upload_cb(g, recv_jal_cb, GET_BYTE_PATCH_ADDR);
@@ -135,9 +160,9 @@ int main(int argc, char ** argv)
   }
 
 #if USE_FAST_RECEIVE
-  set_mode(g, GSCOMMS_MODE_FAST);
+     set_mode(g, GSCOMMS_MODE_FAST);
 #elif USE_BULK_RECEIVE
-  set_mode(g, GSCOMMS_MODE_BULK);
+     set_mode(g, GSCOMMS_MODE_BULK);
 #endif 
 
 #if 1
